@@ -1,0 +1,8 @@
+interface:
+
+  display_name: "WXS (공문서 에디터) CLI"
+
+  short_description: "컴퓨터 유즈 없이 WXS (공문서 에디터) 조회·초안 입력"
+
+  default_prompt: "$wxs-cli로 열린 에듀파인 공문을 확인하고 요청한 초안을 임시저장까지 작성해줘. 결재올림은 하지 마."
+
