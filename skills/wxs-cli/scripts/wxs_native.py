@@ -25,7 +25,7 @@ def items(collection):
         yield call(collection, "item", index)
 
 
-def windows():
+def windows(include_hidden=False):
     service = win32com.client.GetObject("winmgmts:")
     pids = {int(p.ProcessId) for p in service.ExecQuery(
         "SELECT ProcessId FROM Win32_Process WHERE Name='WXSClient.exe'")}
@@ -33,16 +33,19 @@ def windows():
 
     def visit(hwnd, unused):
         pid = win32process.GetWindowThreadProcessId(hwnd)[1]
-        if (pid in pids and win32gui.IsWindowVisible(hwnd)
+        if (pid in pids and (include_hidden or win32gui.IsWindowVisible(hwnd))
                 and win32gui.GetWindowText(hwnd)):
             result.append({"hwnd": hwnd, "pid": pid,
-                           "title": win32gui.GetWindowText(hwnd)})
+                           "title": win32gui.GetWindowText(hwnd),
+                           "visible": bool(win32gui.IsWindowVisible(hwnd)),
+                           "enabled": bool(win32gui.IsWindowEnabled(hwnd)),
+                           "class": win32gui.GetClassName(hwnd)})
     win32gui.EnumWindows(visit, None)
     return result
 
 
 def select_window(args):
-    candidates = windows()
+    candidates = windows(include_hidden=args.hwnd is not None)
     if args.hwnd is not None:
         candidates = [w for w in candidates if w["hwnd"] == args.hwnd]
     if len(candidates) != 1:

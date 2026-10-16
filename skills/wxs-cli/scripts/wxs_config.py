@@ -2,7 +2,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
+PACK_ID = "narae_gyomoo_portal"
 FIELDS = {"expected_title", "title", "body", "body_file", "task_card",
           "private_reasons", "approver", "recipient", "auto_send", "attachments",
           "save_name"}

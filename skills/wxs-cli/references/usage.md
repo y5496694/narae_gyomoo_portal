@@ -27,6 +27,11 @@ python $wxsCli windows
 | `inspect --hwnd 값` | 프레임·컨트롤·편집 상태·함수 이름 조회 |
 | `text --hwnd 값` | editor1 본문과 추출 전후 상태 |
 | `attachments --hwnd 값` | DOM 첨부 표의 파일명·크기. 다운로드 없음 |
+| `attachment-status --hwnd 값` | 현재 앱 첨부 목록의 이름·표시 크기 |
+| `export-attachments --hwnd 값 --expected-title 제목 --directory 새폴더` | 현재 공문의 모든 첨부를 앱 저장 함수로 내려받고 파일·크기·해시 확인 |
+| `read-next --expected-title 제목 --out 새JSON --background --attachments-dir 새폴더` | 새로 열리는 해당 제목의 읽기 전용 창 한 개를 기다려 본문·첨부 저장 후 닫기 |
+| `read-open --hwnd 값 --expected-title 제목 --out 새JSON --background --attachments-dir 새폴더` | 이미 열린 작업 소유 문서의 명시적 hwnd를 읽고 닫기 |
+| `close-readonly --hwnd 값 --expected-title 제목` | 제목·pid·읽기 전용·수정 없음 확인 후 한 창 닫기 |
 | `draft-status --hwnd 값` | 표준 양식의 본문·제목·공개 제한·경로·수신자 등 |
 | `draft --config 파일` | 오프라인 설정 검증과 변경 계획 |
 | `draft --config 파일 --hwnd 값 --apply` | 실제 입력, save_name이 있으면 서버 임시저장 |
@@ -45,6 +50,20 @@ python $wxsCli draft --config .\draft.json --hwnd 123456 --apply
 ```
 
 `--out`은 새 파일만 만든다. 기존 파일이 있으면 작업을 시작하지 않는다. `text --out`의 파일만 순수 텍스트이며 나머지는 JSON이다. Python 하위 프로세스는 인자 배열과 `encoding='utf-8'`을 사용한다. 제목·본문을 셸 문자열에 이어 붙이지 않는다.
+
+## 공람을 한 건씩 읽고 닫기
+
+1. 웹 목록에서 실제 문서 제목·번호를 얻는다. `read-next`를 시작하고 표준출력의 `ready:true`를 확인한다. 이 명령은 기존 창(숨은 창 포함)을 제외하므로 실행 전에 문서를 열어 버리지 않는다.
+2. 웹에서 그 제목을 한 번 누른다. CLI는 새 창 중 **제목이 일치하는 유일한 창**만 읽는다. 웹의 공백 축약 차이를 위해 연속 공백·줄바꿈만 한 칸으로 정규화하며 문구·기호·접두어의 부분 일치는 허용하지 않는다. 여러 후보·시간 초과이면 다른 창을 임의로 고르지 않는다. 새 WXS의 인증서 창이 나타나면 `status:authentication_required`, 종료 코드 **2**로 기록하고 창을 보존한다. 사용자에게 보안문서의 추가 인증이 필요하다고 알린 뒤 다른 문서를 계속 확인한다. 인증창 자체를 세션 만료로 단정하거나 닫지 않는다. `--timeout`은 5~300초이며 기본값은 90초다.
+3. 결과 파일에서 본문 `body.text`, 추출 전후 상태, 첨부 목록과 저장 결과를 확인한다. 비전자 문서는 `body.source:non_electronic_attachment`로 표시될 수 있다. 이때 편집기 본문을 읽은 것이 아니며 저장된 원문 PDF 등을 실제로 읽어야 한다.
+4. `closed:true`를 확인하고 다음 문서를 연다. CLI는 본문과 첨부 저장 결과를 파일에 보존한 뒤 창 닫기를 요청한다. 닫기 실패 시 결과 파일에는 `closed:false`가 남고 실패한 창은 숨긴 상태로 방치하지 않도록 활성화 없이 복원한다. 실제 창을 다시 대조하고 `close-readonly`로 이어간다. 저장/종료 확인창은 자동 수락하지 않는다.
+5. [첨부 읽기 도구](attachments.md)로 **저장한 모든 첨부 내용**을 확인하고 본문과 대조한 뒤 보고한다. 이 내용 검토는 WXS를 닫은 뒤에도 진행할 수 있다. `all_exported:false`, `exported:false`, 읽기 실패·OCR 실패·시각 확인 대기는 미확인으로 남긴다. 표시 크기와 실제 크기가 다르면 `size_matches:false`가 남는다. 파일 형식과 실제 내용으로 추가 확인하며 크기 일치만으로 읽기 완료를 판단하지 않는다.
+
+`--background`는 **제목이 확인된 뒤** 해당 창을 숨기는 최선의 처리다. 창 생성 순간·인증서 로그인창의 최초 활성화는 WXS 자체 동작이며 이 옵션이 방지하지 못할 수 있다. 보안 설정을 바꾸거나 다른 앱 포커스를 강제로 되돌리지 않는다. 완전한 무인·비대화형 실행을 보장하지 않는다.
+
+인증 대기 문서는 `body_read:false`, `closed:false`, `preserved:true`로 남고 자동 닫기 대상에서 제외된다. 이후 명령은 기존 대기 창을 제외한 새 문서만 선택한다. 사용자 인증 뒤 `windows --include-hidden`으로 숨겨진 창까지 실제 제목을 다시 확인하고 작업 소유 창에 `read-open --hwnd 실제값 ...`를 사용한다. 인증 대기 창에는 닫기 명령을 사용하지 않는다. 세션 유지는 [공통 30분 연장 절차](../../narae-gyomu-work-portal/references/login.md)를 따른다.
+
+첨부 저장은 현재 앱의 `Attach.saveFilesAs`를 사용한다. 새 대상 폴더만 허용하고 중복·경로 이탈·Windows에서 안전하지 않은 이름을 거부한다. 파일이 실제로 생성됐는지 확인하고 실패한 항목을 기록한다. 서버 파일 URL을 CLI 밖에서 조립·재생하거나 인증 정보를 다른 다운로드 도구로 넘기지 않는다.
 
 ## 웹 단계와 CLI 단계
 

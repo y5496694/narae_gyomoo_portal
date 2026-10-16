@@ -10,6 +10,21 @@ function wxsAction(action, p) {
         need(typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed,
              "Expected an unprocessed sancgian draft");
     }
+    if (action === "read_kind") {
+        need(typeof rInfo === "object", "Document metadata unavailable");
+        return {non_electronic: String(rInfo.externalflag) === "2" && String(rInfo.draftsrc) === "4"};
+    }
+    if (action === "attachment_manifest" || action === "attachment_export") {
+        need(typeof Attach !== "undefined" && Attach.fileBox && typeof Attach.fileBox.fileListAtGroup === "function", "Attachment file list unavailable");
+        var files = Attach.fileBox.fileListAtGroup(), manifest = [];
+        for (var ai = 0; ai < files.length; ai++) manifest.push({name: String(files[ai].fileName), size: Number(files[ai].size)});
+        if (action === "attachment_manifest") return manifest;
+        need(JSON.stringify(manifest) === JSON.stringify(p.expected), "Attachment list changed; export stopped");
+        need(typeof Attach.saveFilesAs === "function", "Observed app attachment-save handler unavailable");
+        var saved = [];
+        Attach.saveFilesAs(p.directory, function(path) { saved.push(String(path)); });
+        return {saved: saved};
+    }
     if (action === "ready") {
         try {
             if (p.kind === "open_task") {
