@@ -9,7 +9,7 @@ import win32gui
 import win32process
 
 import wxs_native as native
-from wxs_config import normalize_text, replacement_dialog
+from wxs_config import normalize_text, replacement_dialog, verify_attachment
 
 
 class DraftFailure(RuntimeError):
@@ -196,6 +196,8 @@ class Session:
         completed, attempted = [], "preflight"
         try:
             before = self.require_draft(config["expected_title"])
+            for file in config["attachments"]:
+                verify_attachment(file)
             if "approver" in config and len(before["approval_rows"]) != 1:
                 raise ValueError("Expected a drafter-only approval line before changes")
             if "recipient" in config and before["recipient"]:
@@ -272,8 +274,7 @@ class Session:
                 if existing:
                     raise ValueError("Attachment list is not empty; existing files preserved")
                 for file in config["attachments"]:
-                    if Path(file["path"]).stat().st_size != file["size"]:
-                        raise ValueError("Attachment size changed since config validation")
+                    verify_attachment(file)
                     existing = self.action("attach", dict(file, expected_count=len(existing)))
                     if existing[-1] != {"name": file["name"], "size": file["size"]}:
                         raise ValueError("Attachment metadata readback mismatch")

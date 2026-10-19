@@ -1,6 +1,8 @@
 from pathlib import Path
 import sys
 import unittest
+import tempfile
+import hashlib
 from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'
@@ -55,6 +57,22 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(failure.exception.details['completed_steps'], [])
             self.assertEqual(failure.exception.details['attempted_step'], 'preflight')
             call.assert_not_called()
+
+    def test_same_size_replaced_attachment_fails_before_any_draft_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'same-name.txt'
+            path.write_bytes(b'original')
+            file = {'path': str(path), 'name': path.name, 'size': 8,
+                    'sha256': hashlib.sha256(b'original').hexdigest()}
+            path.write_bytes(b'replaced')
+            session = self.fake()
+            session.require_draft = lambda _: {}
+            with patch('wxs_runtime.native.call') as call:
+                with self.assertRaises(DraftFailure) as failure:
+                    session.draft({'expected_title': '', 'title': '가상', 'attachments': [file]})
+                self.assertEqual(failure.exception.details['attempted_step'], 'preflight')
+                self.assertIn('content changed', str(failure.exception))
+                call.assert_not_called()
 
     def test_existing_approval_line_fails_before_title_change(self):
         session = self.fake()

@@ -1,5 +1,6 @@
 """Offline validation and plans. Does not import Windows/COM modules."""
 import json
+import hashlib
 from pathlib import Path
 
 VERSION = "0.3.0"
@@ -31,6 +32,21 @@ def no_duplicates(pairs):
             raise ValueError("Duplicate JSON key: " + key)
         out[key] = value
     return out
+
+
+def attachment_fingerprint(path):
+    digest, size = hashlib.sha256(), 0
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
+def verify_attachment(file):
+    actual = attachment_fingerprint(file["path"])
+    if any(actual[key] != file[key] for key in ("size", "sha256")):
+        raise ValueError("Attachment content changed since config validation: " + file["path"])
 
 
 def load_config(path):
@@ -79,7 +95,7 @@ def load_config(path):
         if key in seen:
             raise ValueError("Duplicate attachment path: " + str(target))
         seen.add(key)
-        resolved.append({"path": str(target), "name": target.name, "size": target.stat().st_size})
+        resolved.append({"path": str(target), "name": target.name, **attachment_fingerprint(target)})
     data["attachments"] = resolved
     return data
 

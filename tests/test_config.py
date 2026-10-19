@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -52,7 +53,8 @@ class ConfigTests(unittest.TestCase):
         attachment = self.root / '시험 첨부.pdf'
         attachment.write_bytes(b'mock-pdf')
         config = self.load(attachments=[attachment.name])
-        self.assertEqual(config['attachments'][0], {'path': str(attachment.resolve()), 'name': attachment.name, 'size': 8})
+        self.assertEqual(config['attachments'][0], {'path': str(attachment.resolve()), 'name': attachment.name, 'size': 8,
+                                                  'sha256': hashlib.sha256(b'mock-pdf').hexdigest()})
 
     def test_attachment_missing_empty_duplicate_rejected(self):
         with self.assertRaises(FileNotFoundError): self.load(attachments=['missing.pdf'])
