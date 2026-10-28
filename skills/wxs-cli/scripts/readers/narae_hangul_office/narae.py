@@ -38,8 +38,14 @@ def main():
             if not found:
                 raise ValueError('앱 Node 런타임이 없습니다. 설치.cmd를 실행하세요.')
             node = Path(found)
-        return subprocess.run([str(node), str(root / 'src/cli.cjs'), *sys.argv[1:]],
-                              creationflags=0x08000000 if os.name == 'nt' else 0).returncode
+        process = subprocess.run([str(node), str(root / 'src/cli.cjs'), *sys.argv[1:]],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 creationflags=0x08000000 if os.name == 'nt' else 0)
+        # CREATE_NO_WINDOW can discard inherited Windows standard handles.
+        # Explicit pipes preserve the CLI JSON for an agent's subprocess reader.
+        sys.stdout.buffer.write(process.stdout)
+        sys.stderr.buffer.write(process.stderr)
+        return process.returncode
     except (ValueError, OSError) as error:
         print(json.dumps({'success': False, 'error': str(error)}, ensure_ascii=False))
         return 1
