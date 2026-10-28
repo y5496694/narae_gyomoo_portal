@@ -12,7 +12,7 @@ import sys
 import zipfile
 
 HERE = Path(__file__).resolve().parent
-NARAE = HERE / 'readers/narae_hangul/scripts/narae.py'
+NARAE = HERE / 'readers/narae_hangul_office/narae.py'
 
 
 def json_file(path, value):
@@ -75,6 +75,8 @@ def native_hangul(source, directory, render):
     result = json.loads(raw.read_text(encoding='utf-8-sig'))
     if process.returncode or not result.get('success') or not result.get('input_unchanged'):
         raise ValueError('Narae Hangul refused/failed: ' + str(result.get('error', process.stderr[-1000:])))
+    if result.get('textDetailsLoaded') is False:
+        raise ValueError('변경 추적 문서는 나래 한글 오피스 live-read로 현재 본문을 확인하세요. 빈 문서로 처리하지 않습니다.')
     paragraphs = [{'id': p['id'], 'text': p.get('text', '')} for p in result.get('paragraphs', [])]
     text = '\n'.join(p['text'] for p in paragraphs)
     images = result.get('images', [])
@@ -86,7 +88,7 @@ def native_hangul(source, directory, render):
         if process.returncode or not pdf.is_file():
             raise ValueError('Narae Hangul preview failed: ' + process.stderr[-1000:])
         view = render_pdf(pdf, directory)
-    return {'reader': 'Narae Hangul (bundled CLI)', 'text': text, 'paragraphs': paragraphs,
+    return {'reader': 'Narae Hangul Office CLI', 'text': text, 'paragraphs': paragraphs,
             'tables': result.get('tables', []), 'embedded_images': images, 'visual_pages': view,
             'needs_visual_review': bool(images), 'warnings': result.get('warnings', []),
             'read_restrictions': result.get('read_only'), 'source_unchanged': True}
@@ -270,7 +272,15 @@ def main():
     parser.add_argument('--doctor', action='store_true')
     args = parser.parse_args()
     if args.doctor:
-        result = {'narae_cli': NARAE.is_file(), 'dependencies': {m: importlib.util.find_spec(m) is not None for m in ('pypdf', 'pypdfium2', 'openpyxl', 'xlrd', 'docx', 'pptx', 'PIL', 'PySide6', 'olefile', 'fontTools', 'Crypto')},
+        probe = subprocess.run([sys.executable, '-X', 'utf8', str(NARAE), 'doctor'],
+                               capture_output=True, encoding='utf-8', errors='replace', timeout=30,
+                               creationflags=0x08000000 if os.name == 'nt' else 0)
+        try:
+            office = json.loads(probe.stdout)
+        except ValueError:
+            office = {'success': False, 'error': probe.stderr[-1000:]}
+        result = {'narae_cli': NARAE.is_file(), 'dependencies': {m: importlib.util.find_spec(m) is not None for m in ('pypdf', 'pypdfium2', 'openpyxl', 'xlrd', 'docx', 'pptx', 'PIL')},
+                  'narae_office': office,
                   'korean_ocr': 'Windows language pack checked when reading an image' if os.name == 'nt' else 'unavailable; visual review required'}
     else:
         if not args.input or not args.out_dir:
@@ -279,7 +289,7 @@ def main():
         result = {k: result[k] for k in ('source', 'status', 'error', 'needs_visual_review') if k in result}
         result['result'] = str((args.out_dir / 'result.json').resolve())
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return int(result.get('status') == 'failed')
+    return int(result.get('status') == 'failed' or (args.doctor and (not office.get('success') or not all(result['dependencies'].values()))))
 
 
 if __name__ == '__main__':

@@ -34,7 +34,7 @@ class AttachmentReaderTests(unittest.TestCase):
                     before = hashlib.sha256(source.read_bytes()).hexdigest()
                     result = read_file(source, root/f'read-{ext}')
                     self.assertEqual(result['status'], 'extracted', result.get('error'))
-                    self.assertEqual(result['reader'], 'Narae Hangul (bundled CLI)')
+                    self.assertEqual(result['reader'], 'Narae Hangul Office CLI')
                     self.assertIn('제출 기한은 10월 21일', result['text'])
                     self.assertEqual(before, hashlib.sha256(source.read_bytes()).hexdigest())
 
