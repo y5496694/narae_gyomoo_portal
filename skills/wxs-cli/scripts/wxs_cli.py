@@ -63,6 +63,8 @@ def parser():
     final.add_argument("--expected-fingerprint")
     final.add_argument("--receipt", type=Path)
     final.add_argument("--out", type=Path)
+    dialog = commands.add_parser("final-dialog", help="Read the attempted final action's actual native message without accepting it")
+    dialog.add_argument("--receipt", type=Path, required=True)
     confirm = commands.add_parser("final-confirm", help="Accept one exact observed operation-specific native confirmation")
     confirm.add_argument("--receipt", type=Path, required=True)
     confirm.add_argument("--expected-message", required=True)
@@ -111,6 +113,10 @@ def run(args):
                 return read_next(args, native)
             window = native.select_window(args)
             return close_readonly(window, args.expected_title, native)
+        if args.command == "final-dialog":
+            import wxs_runtime
+            from wxs_final import inspect_dialog
+            return inspect_dialog(args.receipt, wxs_runtime)
         if args.command == "final-confirm":
             import wxs_runtime
             from wxs_final import confirm

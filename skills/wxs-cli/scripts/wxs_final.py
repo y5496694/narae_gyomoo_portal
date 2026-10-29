@@ -78,6 +78,19 @@ def apply(session, plan, expected_fingerprint, receipt_path, authorized):
     return receipt
 
 
+def inspect_dialog(receipt_path, native_runtime):
+    receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    if receipt.get("status") != "verification_required":
+        raise ValueError("Only the attempted final action's receipt may inspect its confirmation")
+    candidates = [w for w in native_runtime.process_windows(receipt["window"]["pid"])
+                  if w["title"] == "웹 페이지 메시지"]
+    if len(candidates) > 1:
+        raise ValueError("Multiple site messages; stop and inspect the application")
+    message = native_runtime.alert_details(candidates[0])[0] if candidates else None
+    return {"present": bool(candidates), "message": message, "completed": False,
+            "verification_required": True, "untrusted": True}
+
+
 def confirm(receipt_path, expected_message, authorized, native_runtime):
     if authorized is not True or not expected_message.strip():
         raise ValueError("Exact observed message and --confirm-final-action are required")

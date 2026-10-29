@@ -81,6 +81,20 @@ class FinalTests(unittest.TestCase):
             self.assertEqual(json.loads(f.read_text(encoding='utf-8'))['status'], 'attempting')
             with self.assertRaises(FileExistsError): apply(s, p, p['fingerprint'], Path(tmp) / 'new.json', True)
 
+    def test_confirmation_message_is_observed_without_clicking(self):
+        from wxs_final import inspect_dialog
+        s = self.session(); p = prepare(s, 'submit', '합성 문서', '상신')
+        runtime = SimpleNamespace(process_windows=Mock(return_value=[{'hwnd':30,'title':'웹 페이지 메시지'}]),
+                                  alert_details=Mock(return_value=('상신하시겠습니까?', [])), press_dialog_button=Mock())
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / 'r.json'; apply(s, p, p['fingerprint'], f, True)
+            observed = inspect_dialog(f, runtime)
+            self.assertEqual(observed['message'], '상신하시겠습니까?')
+            self.assertFalse(observed['completed'])
+            runtime.press_dialog_button.assert_not_called()
+            runtime.process_windows.return_value=[]
+            self.assertFalse(inspect_dialog(f, runtime)['present'])
+
     def test_exact_operation_specific_confirmation_only_once(self):
         s = self.session(); p = prepare(s, 'submit', '합성 문서', '상신')
         runtime = SimpleNamespace(process_windows=Mock(return_value=[{'hwnd': 30, 'title': '웹 페이지 메시지'}]),
