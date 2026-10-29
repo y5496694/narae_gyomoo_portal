@@ -1,5 +1,5 @@
 /* Fixed internal actions for the observed K-Edufine WXS draft form (ES5/JScript).
- * No generic script execution is exposed by the CLI. No submission action exists.
+ * No generic script execution is exposed. Final actions use a document-bound preview.
  */
 function wxsAction(action, p) {
     function need(ok, message) { if (!ok) throw Error(message); }
@@ -9,6 +9,29 @@ function wxsAction(action, p) {
     function requireDraft() {
         need(typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed,
              "Expected an unprocessed sancgian draft");
+    }
+    if (action === "final_buttons" || action === "final_click") {
+        var controls = document.getElementsByTagName("*"), finalButtons = [], targets = [];
+        for (var fi = 0; fi < controls.length; fi++) {
+            var control = controls[fi], tag = String(control.tagName || "").toLowerCase();
+            if (tag !== "button" && tag !== "a" && !(tag === "input" && /^(button|submit)$/.test(control.type))) continue;
+            var label = String(control.getAttribute("aria-label") || control.innerText || control.value || control.title || "").replace(/^\s+|\s+$/g, "");
+            if (!/^(상신|결재올림|결재|결재\s*승인|승인)$/.test(label)) continue;
+            var rect = control.getBoundingClientRect(), style = control.currentStyle || {};
+            if (rect.right <= rect.left || rect.bottom <= rect.top || style.display === "none" || style.visibility === "hidden") continue;
+            finalButtons.push({index: fi, label: label, disabled: !!control.disabled || control.getAttribute("aria-disabled") === "true"});
+            targets.push(control);
+        }
+        if (action === "final_buttons") return finalButtons;
+        need(typeof rInfo === "object" && (rInfo.docProcessed === false || rInfo.docProcessed === 0), "Document processing state changed or unknown");
+        need((p.operation === "submit" && rInfo.appType === "sancgian") || (p.operation === "approve" && rInfo.appType === "sanckyul"), "Operation does not match this form");
+        if (document.getElementById("Sj")) need(String(el("Sj").value) === p.expected_title, "Title changed before final click");
+        var selected = null;
+        for (var fj = 0; fj < finalButtons.length; fj++) {
+            if (JSON.stringify(finalButtons[fj]) === JSON.stringify(p.button) && !finalButtons[fj].disabled) selected = targets[fj];
+        }
+        need(selected, "Observed final button changed");
+        return later(function() { if ((rInfo.docProcessed === false || rInfo.docProcessed === 0) && !selected.disabled) selected.click(); });
     }
     if (action === "read_kind") {
         need(typeof rInfo === "object", "Document metadata unavailable");
@@ -48,7 +71,7 @@ function wxsAction(action, p) {
         }
         for (i = 1; i <= 8; i++) if (document.getElementById("othbcAt" + i) && el("othbcAt" + i).checked) reasons.push(i);
         return {app_type: typeof rInfo === "object" ? String(rInfo.appType) : "",
-                processed: typeof rInfo === "object" ? !!rInfo.docProcessed : null,
+                processed: typeof rInfo === "object" && rInfo.docProcessed != null ? !!rInfo.docProcessed : null,
                 title: document.getElementById("Sj") ? String(el("Sj").value) : null,
                 task_card: txt("referTaskTable"), private: document.getElementById("othbcLmtt3") ? !!el("othbcLmtt3").checked : null,
                 private_reasons: reasons, approval_rows: rows, recipient: txt("recpList"),

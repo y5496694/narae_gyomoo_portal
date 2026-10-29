@@ -16,6 +16,21 @@ function ctx(extra={}) {
 test('unsupported submission and generic script actions are rejected', () => {
   const c=ctx(); for (const action of ['submit','send','eval']) assert.throws(()=>c.wxsAction(action,{}),/Unsupported/);
 });
+test('observed final controls only click the matching live form and title', () => {
+  for (const [operation,appType,label] of [['submit','sancgian','상신'],['approve','sanckyul','결재']]) {
+    let clicked=0;
+    const button={tagName:'BUTTON',innerText:label,disabled:false,getAttribute(){return null;},getBoundingClientRect(){return {left:0,right:50,top:0,bottom:20};},click(){clicked++;}};
+    const c=ctx({rInfo:{appType,docProcessed:false},document:{getElementById(id){return id==='Sj'?{value:'합성 QA-001'}:null;},getElementsByTagName(){return [button];}}});
+    const observed=c.wxsAction('final_buttons',{});assert.equal(observed.length,1);assert.equal(clicked,0);
+    assert.throws(()=>c.wxsAction('final_click',{button:observed[0],operation,expected_title:'다른 문서'}),/Title changed/);
+    c.wxsAction('final_click',{button:observed[0],operation,expected_title:'합성 QA-001'});c.flush();assert.equal(clicked,1);
+    delete c.rInfo.docProcessed;
+    assert.throws(()=>c.wxsAction('final_click',{button:observed[0],operation,expected_title:'합성 QA-001'}),/unknown/);
+    assert.equal(c.wxsAction('status',{}).processed,null);
+    c.rInfo.docProcessed=false;button.disabled=true;
+    assert.throws(()=>c.wxsAction('final_click',{button:observed[0],operation,expected_title:'합성 QA-001'}),/button changed/);
+  }
+});
 test('readonly document cannot open write dialogs', () => {
   const c=ctx({rInfo:{appType:'sanckyul',docProcessed:false},fncReportCours(){throw Error('must not call');}});
   assert.throws(()=>c.wxsAction('open_approval',{}),/unprocessed sancgian/);
