@@ -29,6 +29,12 @@ def parser():
     close = commands.add_parser("close-readonly", help="Close one unchanged read-only WXS window")
     close.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
     close.add_argument("--expected-title", required=True)
+    capture = commands.add_parser("capture", help="Render actual draft body pages without changing the document")
+    capture.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    capture.add_argument("--expected-title", required=True)
+    capture.add_argument("--directory", type=Path, required=True)
+    capture.add_argument("--dpi", type=int, default=150)
+    capture.add_argument("--out", type=Path)
     for name in ("inspect", "text", "attachments", "attachment-status", "export-attachments", "draft-status", "draft", "save-draft"):
         command = commands.add_parser(name)
         command.add_argument("--hwnd", type=lambda value: int(value, 0),
@@ -87,6 +93,10 @@ def run(args):
             window = native.select_window(args)
             return close_readonly(window, args.expected_title, native)
         window = native.select_window(args)
+        if args.command == "capture":
+            from wxs_document import capture_pages
+            from wxs_runtime import Session
+            return capture_pages(Session(window), args.expected_title, args.directory, args.dpi)
         if args.command == "export-attachments":
             from wxs_read import export_attachments
             return export_attachments(window, args.expected_title, args.directory, native)

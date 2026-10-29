@@ -134,6 +134,13 @@ def inspect(docs):
         row["com_type"] = info.GetDocumentation(-1)[0]
         row["member_names"] = sorted({info.GetNames(
             info.GetFuncDesc(i)[0])[0] for i in range(info.GetTypeAttr().cFuncs)})
+        row["document_methods"] = {}
+        for index in range(info.GetTypeAttr().cFuncs):
+            desc = info.GetFuncDesc(index)
+            names = info.GetNames(desc[0])
+            if names[0] in {"CreatePageImage", "CreatePageImageEx", "SetTextFile", "MoveToField"}:
+                row["document_methods"][names[0]] = {"parameters": list(names[1:]),
+                    "documentation": info.GetDocumentation(desc[0])[1]}
         controls.append(row)
     return {"pages": pages, "editors": controls}
 

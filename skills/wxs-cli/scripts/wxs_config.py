@@ -3,9 +3,9 @@ import json
 import hashlib
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 PACK_ID = "narae_gyomoo_portal"
-FIELDS = {"expected_title", "title", "body", "body_file", "task_card",
+FIELDS = {"expected_title", "title", "body", "body_file", "body_hwp", "task_card",
           "private_reasons", "approver", "recipient", "auto_send", "attachments",
           "save_name"}
 
@@ -55,8 +55,20 @@ def load_config(path):
     exact_object(data, FIELDS, {"expected_title", "title"}, "config")
     string(data["expected_title"], "expected_title", empty=True)
     string(data["title"], "title")
-    if "body" in data and "body_file" in data:
-        raise ValueError("Use either body or body_file")
+    if sum(key in data for key in ("body", "body_file", "body_hwp")) > 1:
+        raise ValueError("Use only one of body, body_file, or body_hwp")
+    if "body_hwp" in data:
+        document = data["body_hwp"]
+        exact_object(document, {"path", "expected_text"}, {"path", "expected_text"}, "body_hwp")
+        source = (path.parent / string(document["path"], "body_hwp.path")).resolve(strict=True)
+        string(document["expected_text"], "body_hwp.expected_text")
+        if source.suffix.lower() != ".hwp" or not source.is_file() or not 0 < source.stat().st_size <= 32 * 1024 * 1024:
+            raise ValueError("body_hwp requires a nonempty HWP file of at most 32 MiB")
+        with source.open("rb") as stream:
+            if stream.read(8) != bytes.fromhex("d0cf11e0a1b11ae1"):
+                raise ValueError("body_hwp requires a binary HWP document")
+        data["body_hwp"] = {"path": str(source), "expected_text": document["expected_text"],
+                            **attachment_fingerprint(source)}
     if "body_file" in data:
         source = path.parent / string(data.pop("body_file"), "body_file")
         data["body"] = source.read_text(encoding="utf-8-sig")
@@ -102,7 +114,7 @@ def load_config(path):
 
 def plan(config):
     steps = ["title"]
-    for key in ("body", "private_reasons", "task_card", "approver", "recipient", "auto_send"):
+    for key in ("body", "body_hwp", "private_reasons", "task_card", "approver", "recipient", "auto_send"):
         if key in config:
             steps.append(key)
     if config["attachments"]:

@@ -69,6 +69,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(self.load(body_file='본문.txt')['body'], '한글\r\n본문')
         with self.assertRaises(ValueError): self.load(body_file='본문.txt', body='x')
 
+    def test_formatted_body_fingerprint_and_exclusivity(self):
+        source = self.root / 'body.hwp'
+        source.write_bytes(bytes.fromhex('d0cf11e0a1b11ae1') + b'fake-document')
+        spec = {'path': source.name, 'expected_text': '가상 본문'}
+        config = self.load(body_hwp=spec)
+        self.assertEqual(config['body_hwp']['sha256'], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(plan(config)['steps'], ['title', 'body_hwp'])
+        with self.assertRaises(ValueError): self.load(body_hwp=spec, body='text')
+        with self.assertRaises(ValueError): self.load(body_hwp={'path': source.name})
+        source.write_bytes(b'not-a-hwp-file')
+        with self.assertRaises(ValueError): self.load(body_hwp=spec)
+
     def test_exact_recipient_and_approver_schema(self):
         with self.assertRaises(ValueError): self.load(recipient={'search': 'a'})
         with self.assertRaises(ValueError): self.load(approver={'name': 'x', 'send': True})

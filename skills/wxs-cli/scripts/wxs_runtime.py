@@ -95,6 +95,7 @@ class Session:
         status.update({"edit_mode": int(control.EditMode), "is_modified": bool(control.IsModified),
                        "hwp_title": native.call(control, "GetFieldText", "결재제목"),
                        "body": native.call(control, "GetFieldText", "본문"),
+                       "document_text": native.call(control, "GetTextFile", "TEXT", ""),
                        "page_count": int(control.PageCount),
                        "attachments": native.attachments(self.docs)["rows"],
                        "window": self.window, "frame_errors": self.frame_errors})
@@ -196,6 +197,10 @@ class Session:
         completed, attempted = [], "preflight"
         try:
             before = self.require_draft(config["expected_title"])
+            if "body_hwp" in config:
+                verify_attachment(config["body_hwp"])
+                if normalize_text(str(before["body"])):
+                    raise ValueError("Formatted insertion requires an empty body before changes")
             for file in config["attachments"]:
                 verify_attachment(file)
             if "approver" in config and len(before["approval_rows"]) != 1:
@@ -219,6 +224,11 @@ class Session:
                 native.call(control, "PutFieldText", "본문", config["body"])
                 if normalize_text(str(native.call(control, "GetFieldText", "본문"))) != normalize_text(config["body"]):
                     raise ValueError("Body readback mismatch")
+                completed.append(attempted)
+            if "body_hwp" in config:
+                attempted = "body_hwp"
+                from wxs_document import insert_body
+                insert_body(control, config["body_hwp"])
                 completed.append(attempted)
             if "private_reasons" in config:
                 attempted = "private_reasons"
