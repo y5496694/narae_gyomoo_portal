@@ -39,7 +39,7 @@ python $wxsCli windows
 | `draft --config 파일 --hwnd 값 --apply` | 실제 입력, save_name이 있으면 서버 임시저장 |
 | `save-draft --name 이름 --expected-title 현재제목 --hwnd 값 --apply` | 이미 입력한 초안만 임시저장 |
 
-쓰기 명령은 `--apply`가 없으면 계획만 출력한다. `--replace-existing`은 정확히 같은 임시저장 이름의 교체를 허용한다. 결재올림 명령은 없다. UTF-8 JSON, 성공 0·실패 1로 종료한다.
+쓰기 명령은 `--apply`가 없으면 계획만 출력한다. `--replace-existing`은 정확히 같은 임시저장 이름의 교체를 허용한다. 명시적 상신·결재는 `final-action --operation submit|approve --hwnd 값 --expected-title 정확한제목 --button-label 관찰한버튼`으로 준비한다. 실행에는 `--apply --confirm-final-action --expected-fingerprint 미리보기지문 --receipt 새영수증경로`가 모두 필요하다. 실제 관찰한 확인창은 `final-confirm --receipt 해당영수증 --expected-message 정확한문구 --confirm-final-action`으로 한 번만 수락한다. [최종 처리 절차](../../../docs/final-actions.md)를 따른다. UTF-8 JSON, 성공 0·실패 1로 종료하며 클릭은 처리 완료의 증거가 아니다.
 
 ```powershell
 # 123456을 windows 결과의 실제 hwnd로 치환
