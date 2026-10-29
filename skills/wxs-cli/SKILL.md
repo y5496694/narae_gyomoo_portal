@@ -11,7 +11,7 @@ Windows의 같은 사용자 세션에서 이미 열린 WXS (공문서 에디터,
 
 ## 조회
 
-최초 실행은 [사용법](references/usage.md)을 읽고 `doctor`로 환경을 확인한다. `windows` 결과와 브라우저의 문서 제목·번호를 대조해 실제 hwnd를 선택한다. 여러 창 중 첫 창을 임의로 고르지 않는다.
+최초 실행은 [사용법](references/usage.md)을 읽고 `doctor`로 환경을 확인한다. 자동화 전 **업무포털·K-에듀파인·WXS 각각 1회 실행과 사용자 직접 초기 연동 승인**이 필요하다. WXS는 실제 공문 한 건을 열어 승인까지 확인한다. [공통 최초 실행 절차](../narae-gyomu-work-portal/references/login.md#자동화-전-최초-실행-3단계)를 따른다. `windows` 결과와 브라우저의 문서 제목·번호를 대조해 실제 hwnd를 선택한다. 여러 창 중 첫 창을 임의로 고르지 않는다.
 
 ```powershell
 # $wxsSkill: 현재 설치된 이 SKILL.md가 있는 폴더의 절대 경로
