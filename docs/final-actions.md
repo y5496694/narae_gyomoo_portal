@@ -50,6 +50,8 @@ python $wxsCli final-confirm --receipt $receipt --expected-message '상신하시
 
 상신 후 웹 **문서진행**에서 같은 제목·기안자·기안일시와 현재 검토자의 진행 상태를 확인한다. 결재완료 전 문서번호가 `@N`이면 정식 번호로 보고하지 않는다. 실제 문서 식별자와 해당 결재경로의 기안 완료·다음 검토 진행 상태를 함께 기록하고, 정식 번호가 아직 미부여임을 구분한다.
 
+첨부를 추가·복구한 건은 [첨부 업로드와 서버 사본 검증](../skills/wxs-cli/references/attachment-integrity.md)에 따라 새 서버 문서의 모든 파일을 내려받아 원본 해시를 대조한다. PDF 오류를 고친 건은 네이티브 열기도 확인한다. 메타데이터 표시나 성공 안내가 파일 바이트 검증을 대신하지 않는다. 정확한 실패 안내는 `final-failure-ack`로 닫을 수 있지만 기존 시도 잠금과 재시도 금지는 유지한다. 실패한 원본과 검증된 임시저장 사본을 혼동하지 않는다. 사용자가 맡긴 중복 회수본 정리는 [별도 대상·완료 절차](../skills/narae-gyomu-edufine/references/recalled-cleanup.md)를 따른다.
+
 통합 앱에는 `wxs.final.prepare`, `wxs.final.dialog`, `wxs.final.confirm`이 노출된다. prepare의 PC 미리보기 적용 뒤 받은 `receiptId`로 dialog를 읽고, 관찰한 문구와 같은 ID를 confirm의 `receipt_id`로 쓴다. 이 ID는 해당 도구가 만든 기록만 가리키며 임의 파일 경로가 아니다.
 
 ## 검증 구분

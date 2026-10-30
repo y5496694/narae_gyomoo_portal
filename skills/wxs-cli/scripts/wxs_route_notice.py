@@ -14,6 +14,22 @@ def inspect_notices(window, runtime):
     return {'window': window, 'notices': notices, 'acknowledged': False, 'untrusted': True}
 
 
+def cancel_editor_switch(session, expected_title, runtime):
+    """Cancel only the exact switch-editor prompt, preserving the active editor."""
+    session.check_window()
+    state = session.status()
+    if state.get('title') != expected_title or state.get('hwp_title') != expected_title or state.get('is_modified') is not False:
+        raise ValueError('Expected the same unchanged newly opened document')
+    notices = inspect_notices(session.window, runtime)['notices']
+    if len(notices) != 1 or notices[0]['message'] != '열려있는 기안/결재기를 닫습니다.' or notices[0]['buttons'] != ['확인', '취소']:
+        raise ValueError('Expected the exact editor-switch prompt; no other dialog cancelled')
+    message, children = runtime.alert_details(notices[0]['window'])
+    if message != notices[0]['message']:
+        raise ValueError('Editor-switch notice changed')
+    runtime.press_dialog_button(notices[0]['window'], children, '취소')
+    return {'cancelled': True, 'existing_editor_preserved': True, 'submission': 'not_attempted'}
+
+
 def read_notice(session, expected_title, expected_message, runtime, expected_fingerprint=None, apply=False):
     """Acknowledge only the known content-change information on a read-only view."""
     session.check_window()

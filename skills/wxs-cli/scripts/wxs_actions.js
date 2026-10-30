@@ -10,6 +10,40 @@ function wxsAction(action, p) {
         need(typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed,
              "Expected an unprocessed sancgian draft");
     }
+    function ensureLocalAttachmentUpload() {
+        need(typeof Attach.syncNew === "function" && typeof hsattach !== "undefined", "Native attachment upload integration unavailable");
+        var app = String(rInfo.applID), explicit = {"6010":true,"8010":true,"6023":true,"6022":true,"6056":true,"6024":true};
+        if (explicit[app] || Attach._naraeLocalUploadBound) return;
+        need(app === "2020", "Unverified attachment upload application; no metadata-only addition applied");
+        var original = Attach.syncNew, source = String(original);
+        need(/file\.atPc/.test(source) && /this\.appendTo/.test(source) && /this\.element\.setAttachNameByGroup/.test(source), "Native attachment ID-allocation branch changed");
+        need(typeof hsattach.AddFlashFile === "function" || typeof hsattach.AddFlashFile === "unknown", "Native byte-upload method unavailable");
+        // Preserve native validation, HOX edits and ID allocation. Add the byte
+        // registration missing from the standard-draft local-file branch only
+        // after the native handler supplies each real object ID.
+        Attach.syncNew = function() {
+            var number = Number(arguments[7]);
+            if (isNaN(number) || number < 1) number = 1;
+            var current = this.fileBox.fileListAtGroup(number - 1), local = [];
+            for (var ui = 0; ui < current.length; ui++) {
+                if (current[ui].atPc) {
+                    var file = current[ui], info = FileManager.GetFile(file.path);
+                    need(Number(info.Size) === Number(file.size), "Local attachment changed before native upload");
+                    if (!file.misfileid) local.push({index:ui, path:String(file.path)});
+                }
+            }
+            var ids = original.apply(this, arguments);
+            if (ids === false || ids == null) return ids;
+            need(ids.length === current.length, "Native attachment ID count changed");
+            for (var uq = 0; uq < local.length; uq++) {
+                var id = ids[local[uq].index];
+                need(typeof id === "string" && id.length > 0, "Native attachment object ID missing");
+                hsattach.AddFlashFile(local[uq].path, id);
+            }
+            return ids;
+        };
+        Attach._naraeLocalUploadBound = true;
+    }
     if (action === "restore_export_readonly") {
         need(typeof rInfo === "object" && rInfo.appType === "sancview", "Only a read-only document copy may restore export flags");
         need(typeof IMPL_SetDocumentUpdated === "function", "Observed clean-state helper unavailable");
@@ -96,6 +130,80 @@ function wxsAction(action, p) {
         need(typeof rInfo === "object", "Document metadata unavailable");
         return {non_electronic: String(rInfo.externalflag) === "2" && String(rInfo.draftsrc) === "4"};
     }
+    if (action === "attachment_staging_status" || action === "attachment_stage_replacements") {
+        requireDraft();
+        need(typeof Attach !== "undefined" && Attach.fileBox && typeof FileManager !== "undefined", "Native attachment controls unavailable");
+        var replacementMap = MultiDraft.attachMap || pInfo.attachMap;
+        need(replacementMap && typeof replacementMap.get === "function" && typeof replacementMap.set === "function", "Native attachment edit map unavailable");
+        var replacementFiles = Attach.fileBox.files(), replacementState = [];
+        for (var ri = 0; ri < replacementFiles.length; ri++) {
+            var rf = replacementFiles[ri], mapped = replacementMap.get(rf.FID);
+            replacementState.push({id: String(rf.FID || ""), name: String(rf.name), size: Number(rf.size),
+                                   path: String(rf.path), at_sancbox: !!rf.atSancbox,
+                                   staged: mapped ? {key: String(mapped.key), fileName: String(mapped.fileName), filePath: String(mapped.filePath),
+                                                     size: Number(mapped.size), flag: !!mapped.flag, lastModifiedDate: Number(mapped.lastModifiedDate)} : null});
+        }
+        var syncSource = typeof Attach.syncNew === "function" ? String(Attach.syncNew) : "";
+        var nativeReplacement = /aObj\s*&&\s*aObj\.flag/.test(syncSource) && /hsattach\.AddFlashFile\(aObj\.filePath,\s*oid\)/.test(syncSource);
+        if (action === "attachment_staging_status") return {files: replacementState, native_modified_upload: nativeReplacement};
+        need(nativeReplacement && JSON.stringify(replacementState) === JSON.stringify(p.expected), "Attachment list/edit state changed or native upload branch unavailable");
+        need(p.files && p.files.length > 0 && p.files.length === replacementState.length, "Replacement must cover the exact current attachment list");
+        var stagedValues = [], replacementSeen = {};
+        for (var rs = 0; rs < p.files.length; rs++) {
+            var spec = p.files[rs], current = replacementState[rs];
+            need(spec.id === current.id && spec.name === current.name && current.at_sancbox && current.id && !current.staged && !replacementSeen[current.id], "Replacement identity/order changed or already staged");
+            replacementSeen[current.id] = true;
+            var local = FileManager.GetFile(spec.path), localTime = new Date(local.DateLastModified).getTime();
+            need(Number(local.Size) === spec.size && isFinite(localTime), "Native control cannot read the verified local source");
+            stagedValues.push({key: current.id, fileName: current.name, filePath: spec.path,
+                               lastModifiedDate: localTime, flag: true, size: spec.size});
+        }
+        // This is the same edit-map shape read by the site's native syncNew.
+        // It queues no HTTP request here; native save/submit handles byte upload.
+        for (var rw = 0; rw < stagedValues.length; rw++) replacementMap.set(stagedValues[rw].key, stagedValues[rw]);
+        return wxsAction("attachment_staging_status", {});
+    }
+    if (action === "attachment_diagnostics") {
+        need(typeof Attach !== "undefined" && Attach.fileBox, "Attachment control unavailable");
+        function attachmentFields(file) {
+            var row = {};
+            for (var key in file) {
+                try {
+                    var value = file[key];
+                    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") row[key] = value;
+                } catch (ignored) {}
+            }
+            row.observed_fileName = String(file.fileName);
+            row.observed_path = String(file.path);
+            return row;
+        }
+        var diagnosticFiles = Attach.fileBox.files(), groupFiles = Attach.fileBox.fileListAtGroup(), filesInfo = [], groupsInfo = [], methods = [], definitions = {};
+        for (var di = 0; di < diagnosticFiles.length; di++) filesInfo.push(attachmentFields(diagnosticFiles[di]));
+        for (var gi = 0; gi < groupFiles.length; gi++) groupsInfo.push(attachmentFields(groupFiles[gi]));
+        for (var method in Attach) if (typeof Attach[method] === "function") methods.push(method);
+        var known = ["addFiles", "saveFilesAs", "open", "save", "onopen", "onsave", "onload", "onadd", "ondelete", "onmodify", "checkModified", "checkModifiedUpdate", "checkModifiedCheck", "checkModifiedByTempSave", "sync", "syncNew", "attachAtts", "refresh", "onrefresh"];
+        for (var ki = 0; ki < known.length; ki++) if (typeof Attach[known[ki]] === "function") definitions[known[ki]] = String(Attach[known[ki]]);
+        var boxDefinitions = {}, uploadDefinitions = {};
+        var boxKnown = ["openFileDialog", "addFiles", "_assertFiles", "deleteFiles", "_setDeleteFile", "files", "fileListAtGroup", "selectedFiles", "reload"];
+        for (var bk = 0; bk < boxKnown.length; bk++) if (typeof Attach.fileBox[boxKnown[bk]] === "function") boxDefinitions[boxKnown[bk]] = String(Attach.fileBox[boxKnown[bk]]);
+        if (typeof hsattach !== "undefined") uploadDefinitions.addFlashFileType = typeof hsattach.AddFlashFile;
+        return {files: filesInfo, groups: groupsInfo, methods: methods, definitions: definitions,
+                filebox_definitions: boxDefinitions, upload_definitions: uploadDefinitions,
+                document_id: typeof domHox1 !== "undefined" && typeof get_text === "function" ? String(get_text(domHox1, "/hox/docInfo/ID")) : "",
+                message_id: typeof rInfo === "object" ? String(rInfo.apprMsgID) : "",
+                application_id: typeof rInfo === "object" ? String(rInfo.applID) : "",
+                upload_staging: typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed ? wxsAction("attachment_staging_status", {}) : null,
+                file_constructor: typeof HsFile === "function" ? String(HsFile) : "", untrusted: true};
+    }
+    if (action === "attachment_open") {
+        need(typeof rInfo === "object" && rInfo.appType === "sancview", "Open verification requires a read-only server document");
+        need(typeof p.name === "string" && /\.pdf$/i.test(p.name) && typeof Attach.open === "function", "Expected a named PDF attachment and native open handler");
+        var openFiles = Attach.fileBox.files(), openMatches = [];
+        for (var oi = 0; oi < openFiles.length; oi++) if (String(openFiles[oi].name) === p.name) openMatches.push(openFiles[oi]);
+        need(openMatches.length === 1 && (openMatches[0].atSancbox || openMatches[0].atFileTrans), "Expected one exact server PDF attachment");
+        Attach.open(openMatches[0].path);
+        return {handler_returned: true, name: p.name, evidence: "Native attachment open handler returned without a script exception"};
+    }
     if (action === "attachment_manifest" || action === "attachment_export") {
         need(typeof Attach !== "undefined" && Attach.fileBox && typeof Attach.fileBox.fileListAtGroup === "function", "Attachment file list unavailable");
         var files = Attach.fileBox.fileListAtGroup(), manifest = [];
@@ -128,7 +236,7 @@ function wxsAction(action, p) {
                 var group = [], numberedRows = [];
                 for (var j = 1; j < tables[i].rows.length; j++) {
                     var routeRow = String(tables[i].rows[j].innerText); group.push(routeRow);
-                    if (/^\s*\d+/.test(routeRow)) numberedRows.push(routeRow);
+                    if (/^\s*\d+/.test(routeRow) && !/\)\s*-\s*(?:\d+\.\d+)?\s*$/.test(routeRow)) numberedRows.push(routeRow);
                 }
                 routeGroups.push(group); if (numberedRows.length) numberedGroups.push(numberedRows);
             }
@@ -352,6 +460,7 @@ function wxsAction(action, p) {
     if (action === "attach") {
         requireDraft(); need(typeof HsFile === "function" && typeof Attach !== "undefined", "Attachment handlers unavailable");
         need(Attach.fileBox.files().length === p.expected_count, "Attachment list changed");
+        ensureLocalAttachmentUpload();
         // Keep the site's native _assertFiles/extension/size checks enabled.
         Attach.addFiles([new HsFile(p.path, p.name, p.size)]); Attach.onrefresh();
         var actual = wxsAction("attachment_status", {});

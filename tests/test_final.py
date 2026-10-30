@@ -10,9 +10,39 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'))
 from wxs_final import prepare, apply, confirm, INTERNAL_CONFIRM, processing_preview, process, audit_processing_rejection, acknowledge, COMPLETION_NOTICE, ROUTE_REVIEW, resume_route_review
 from wxs_cli import parser, run
+from wxs_final import acknowledge_failure
 
 
 class FinalTests(unittest.TestCase):
+    def test_failure_acknowledgement_keeps_attempt_locks_and_never_allows_retry(self):
+        for issue in ('none', 'message', 'title', 'processed', 'buttons', 'multiple'):
+            with self.subTest(issue=issue), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp)/'receipt.json'
+                receipt = {'status':'verification_required', 'processing_attempted':True, 'retry_allowed':False,
+                           'fingerprint':'synthetic', 'expected_title':'합성 문서', 'window':{'hwnd':10,'pid':20}}
+                path.write_text(json.dumps(receipt), encoding='utf-8')
+                lock = Path(tmp)/'.wxs-final-attempts'/'attempt.json'
+                lock.parent.mkdir(); lock.write_text('keep', encoding='utf-8')
+                s = self.session()
+                if issue == 'title': s.status.return_value['title'] = '다른 문서'
+                if issue == 'processed': s.status.return_value['processed'] = True
+                notice = {'title':'웹 페이지 메시지', 'hwnd':30}
+                buttons = [{'class':'Button','text':'확인'}] + ([{'class':'Button','text':'취소'}] if issue == 'buttons' else [])
+                runtime = SimpleNamespace(Session=lambda window:s,
+                    process_windows=lambda pid:[notice, notice] if issue == 'multiple' else [notice],
+                    alert_details=lambda window:('다른 안내' if issue == 'message' else '에러가 발생했습니다.', buttons),
+                    press_dialog_button=Mock())
+                if issue == 'none':
+                    result = acknowledge_failure(path, '에러가 발생했습니다.', runtime)
+                    self.assertFalse(result['completed']); self.assertFalse(result['retry_allowed'])
+                    self.assertTrue(result['failure_notice_acknowledged'])
+                    with self.assertRaises(ValueError): acknowledge_failure(path, '에러가 발생했습니다.', runtime)
+                    runtime.press_dialog_button.assert_called_once()
+                else:
+                    with self.assertRaises(ValueError): acknowledge_failure(path, '에러가 발생했습니다.', runtime)
+                    runtime.press_dialog_button.assert_not_called()
+                self.assertEqual(lock.read_text(encoding='utf-8'), 'keep')
+
     def test_native_drafter_signature_clear_is_the_only_allowed_text_change_after_review(self):
         s=self.session();s.status.return_value['document_text']='머리\n가상 기안자\n본문'
         p=prepare(s,'submit','합성 문서','상신');button=s.action.return_value

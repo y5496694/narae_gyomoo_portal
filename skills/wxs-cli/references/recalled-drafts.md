@@ -47,7 +47,7 @@ python $wxsCli route-notice --hwnd $hwnd --expected-title $title --expected-pers
 python $wxsCli draft-options --hwnd $hwnd --expected-title $title --section approval --dialog-hwnd $routeDialog --confirm-route $reviewedRouteJson --apply
 ```
 
-설정은 같은 제목의 `expected_title`, `title`, `approval_route`만 사용한다. 현재 후보에서 확인한 전체 ID를 넣어 동명이인을 구분한다. 기존 결재자를 추가·교체하지 않는다. 확인 후 주 화면에서는 실제 **1·2·3 순번**으로 엄격하게 다시 검증한다. 회수 전 이력 행은 현재 경로에 합치지 않는다.
+설정은 같은 제목의 `expected_title`, `title`, `approval_route`만 사용한다. 현재 후보에서 확인한 전체 ID를 넣어 동명이인을 구분한다. 기존 결재자를 추가·교체하지 않는다. 확인 후 실제 **연속된 현재 순번·역할·사람 순서**를 엄격하게 검증한다. 이력에 따라 현재 순번이 4부터 시작할 수도 있다. 숫자 순번이어도 사용자 ID 뒤 상태가 `-`인 비활성 이력은 현재 경로에 합치지 않는다. 번호 누락·중복·역할 변경은 거절한다.
 
 ## 서식과 재상신 완료 검증
 

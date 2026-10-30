@@ -115,6 +115,9 @@ class ConfigTests(unittest.TestCase):
         rows = ['1기안교사기안자 대기', '2검토부장가상 부장 대기', '3결재교장가상 교장 대기']
         self.assertTrue(approval_route_matches(rows, route))
         self.assertTrue(approval_route_matches(list(reversed(rows)), route))
+        offset = [str(int(row[0]) + 3) + row[1:] for row in rows]
+        self.assertTrue(approval_route_matches(list(reversed(offset)), route))
+        self.assertFalse(approval_route_matches([offset[0], offset[1], '7' + offset[2][1:]], route))
         for invalid in ([rows[0], rows[1], rows[1]], [rows[0], rows[1], '3검토교장가상 교장 대기'], [rows[0], '3검토부장가상 부장 대기', '2결재교장가상 교장 대기']):
             self.assertFalse(approval_route_matches(invalid, route))
 

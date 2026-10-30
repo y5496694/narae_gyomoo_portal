@@ -293,3 +293,30 @@ def acknowledge(receipt_path, expected_message, native_runtime):
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
     native_runtime.press_dialog_button(windows[0], children, "확인")
     return dict(receipt, completed=False, evidence="Completion notice dismissed; server-list verification is still required")
+
+
+def acknowledge_failure(receipt_path, expected_message, native_runtime):
+    """Dismiss one observed failure notice; never unlock or retry the attempt."""
+    path = Path(receipt_path)
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    if (receipt.get('status') != 'verification_required' or not receipt.get('processing_attempted') or
+            receipt.get('failure_notice_acknowledged') or expected_message != '에러가 발생했습니다.'):
+        raise ValueError('Receipt does not permit this exact failure-notice acknowledgement')
+    session = native_runtime.Session(receipt['window'])
+    session.check_window()
+    state = session.status()
+    if state.get('title') != receipt['expected_title'] or state.get('processed') is not False:
+        raise ValueError('Original draft identity or processing state changed')
+    windows = [w for w in native_runtime.process_windows(receipt['window']['pid']) if w['title'] == '웹 페이지 메시지']
+    if len(windows) != 1:
+        raise ValueError('Expected one native failure notice')
+    message, children = native_runtime.alert_details(windows[0])
+    if message != expected_message or [c.get('text', '').replace('&', '').strip() for c in children if c.get('class') == 'Button'] != ['확인']:
+        raise ValueError('Failure notice changed or includes a decision')
+    with path.with_suffix(path.suffix + '.failure-acknowledged').open('x', encoding='utf-8') as stream:
+        stream.write(receipt['fingerprint'])
+    receipt['failure_notice_acknowledged'] = True
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+    native_runtime.press_dialog_button(windows[0], children, '확인')
+    return dict(receipt, completed=False, retry_allowed=False,
+                evidence='Failure notice dismissed; original attempt lock preserved; verify actual server state before recovery')

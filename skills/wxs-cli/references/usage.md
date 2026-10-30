@@ -22,6 +22,8 @@ python $wxsCli windows
 
 ## 명령
 
+첨부 추가·복구 시 [업로드·서버 해시·PDF 열기 검증](attachment-integrity.md)을 반드시 함께 읽는다. `attachment-diagnostics`, `stage-attachments`, `export-attachments --editable-draft`, `open-attachment`, `cancel-editor-switch`, `final-failure-ack`의 조건과 검증 한계도 해당 참조를 따른다.
+
 | 명령 | 용도 |
 | --- | --- |
 | `doctor` | 의존성 확인. 앱 실행·로그인 없음 |

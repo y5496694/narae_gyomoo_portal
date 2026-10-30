@@ -36,9 +36,22 @@ test('readonly document cannot open write dialogs', () => {
   assert.throws(()=>c.wxsAction('open_approval',{}),/unprocessed sancgian/);
 });
 test('current numbered approval rows exclude recall history in the same table',()=>{
-  const rows=[{innerText:'결재경로표-'},{innerText:'2결재가상 교장대기'},{innerText:'1기안가상 교사대기'},{innerText:'-결재가상 교장-'},{innerText:'-기안가상 교사회수'}];
+  const rows=[{innerText:'결재경로표-'},{innerText:'2결재가상 교장대기'},{innerText:'1기안가상 교사대기'},{innerText:'-결재가상 교장-'},{innerText:'-기안가상 교사회수'}, {innerText:'3결재교장합성교장(mock)-0.0'}];
   const c=ctx({rInfo:{appType:'sancgian',docProcessed:false},document:{getElementById(){return null;},getElementsByTagName(tag){return tag==='table'?[{innerText:'결재경로표-',rows}]:[];}}});
   assert.deepEqual(Array.from(c.wxsAction('status',{}).approval_rows),['2결재가상 교장대기','1기안가상 교사대기']);
+});
+
+test('PDF open uses only the unique observed read-only server path',()=>{
+  const files=[{name:'합성.pdf',path:'observed-server-path',atSancbox:true}];
+  const opened=[];
+  const c=ctx({rInfo:{appType:'sancview'},Attach:{fileBox:{files(){return files;}},open(path){opened.push(path);}}});
+  for(const name of ['없는.pdf','실행.exe'])assert.throws(()=>c.wxsAction('attachment_open',{name}));
+  files.push({...files[0]});assert.throws(()=>c.wxsAction('attachment_open',{name:'합성.pdf'}));files.pop();
+  files[0].atSancbox=false;assert.throws(()=>c.wxsAction('attachment_open',{name:'합성.pdf'}));
+  files[0].atSancbox=true;c.rInfo.appType='sancgian';assert.throws(()=>c.wxsAction('attachment_open',{name:'합성.pdf'}));
+  assert.equal(opened.length,0);c.rInfo.appType='sancview';
+  assert.equal(c.wxsAction('attachment_open',{name:'합성.pdf'}).handler_returned,true);
+  assert.deepEqual(opened,['observed-server-path']);
 });
 test('route review proof requires the original native guard and processing gate',()=>{
  const c=ctx({rInfo:{appType:'sancgian',docProcessed:false},pInfo:{appr_inited:false},lang_chkApprLine:'합성 경로 안내',
@@ -157,7 +170,7 @@ test('multiple seals and missing default seal stop', () => {
   inputs=[{id:'ocslRadio0'}];c.wxsAction('auto_send_confirm',{});c.flush();assert.equal(verified,1);
 });
 test('attachment action keeps native validation and verifies rejection', () => {
-  const files=[];let reject=true;const c=ctx({rInfo:{appType:'sancgian'},HsFile:function(path,name,size){Object.assign(this,{path,name,size});},Attach:{fileBox:{files(){return files;}},addFiles(incoming){if(!reject)files.push(...incoming);},onrefresh(){}}});
+  const files=[];let reject=true;const c=ctx({rInfo:{appType:'sancgian',applID:'6010'},hsattach:{},HsFile:function(path,name,size){Object.assign(this,{path,name,size});},Attach:{syncNew:function(){},fileBox:{files(){return files;}},addFiles(incoming){if(!reject)files.push(...incoming);},onrefresh(){}}});
   assert.throws(()=>c.wxsAction('attach',{path:'mock.pdf',name:'mock.pdf',size:8,expected_count:0}),/rejected/);
   reject=false;const result=c.wxsAction('attach',{path:'mock.pdf',name:'mock.pdf',size:8,expected_count:0});assert.equal(result[0].size,8);
 });
@@ -184,5 +197,59 @@ test('processing confirmation uses only the observed same form and excludes scri
 test('temporary save calls only the temporary-save handler', () => {
   let opened=0,saved=0;const input={value:''};const c=ctx({rInfo:{appType:'sancgian'},fncSaveTmpr(){opened++;},fncSave(){saved++;},document:{getElementById(){return input;}}});
   c.wxsAction('open_save',{});c.flush();c.wxsAction('save_name',{name:'가상 초안'});c.flush();assert.equal(opened,1);assert.equal(saved,1);assert.equal(input.value,'가상 초안');
+});
+test('existing attachment repair stages verified bytes in native edit map without submitting', () => {
+  const map = new Map(), files = [{FID:'synthetic-id', name:'synthetic.pdf', size:4, path:'sancbox://synthetic', atSancbox:true}];
+  let checks=0;
+  const c=ctx({rInfo:{appType:'sancgian',docProcessed:false}, MultiDraft:{attachMap:map}, pInfo:{},
+    FileManager:{GetFile(path){checks++;assert.equal(path,'D:\\test\\synthetic.pdf');return {Size:4,DateLastModified:'2026-01-01'};}},
+    Attach:{fileBox:{files(){return files;}},syncNew:function(){var aObj,oid;if(aObj && aObj.flag)hsattach.AddFlashFile(aObj.filePath, oid);}}});
+  const before=c.wxsAction('attachment_staging_status',{});
+  const spec={id:'synthetic-id',name:'synthetic.pdf',path:'D:\\test\\synthetic.pdf',size:4};
+  assert.throws(()=>c.wxsAction('attachment_stage_replacements',{expected:[],files:[spec]}),/changed/);
+  assert.equal(map.size,0);assert.equal(checks,0);
+  const staged=c.wxsAction('attachment_stage_replacements',{expected:before.files,files:[spec]});
+  assert.equal(staged.files[0].staged.flag,true);assert.equal(map.get('synthetic-id').filePath,spec.path);
+  assert.throws(()=>c.wxsAction('attachment_stage_replacements',{expected:staged.files,files:[spec]}),/already staged/);
+  assert.equal(checks,1);
+});
+test('standard draft registers file bytes against native object IDs after native sync, once', () => {
+  const files=[],uploads=[];let nativeCalls=0;
+  const attach={element:{setAttachNameByGroup(){}},appendTo(){},
+    fileBox:{files(){return files;},fileListAtGroup(group){assert.equal(group,0);return files;}},
+    addFiles(incoming){files.push(...incoming);},onrefresh(){},
+    syncNew:function(){nativeCalls++;var file={atPc:true};if(file.atPc)this.appendTo();this.element.setAttachNameByGroup();return ['native-id'];}};
+  const c=ctx({rInfo:{appType:'sancgian',applID:'2020'},Attach:attach,
+    HsFile:function(path,name,size){Object.assign(this,{path,name,size,atPc:true});},
+    hsattach:{AddFlashFile(path,id){uploads.push({path,id});}},FileManager:{GetFile(){return {Size:4};}}});
+  c.wxsAction('attach',{path:'mock.pdf',name:'mock.pdf',size:4,expected_count:0});
+  assert.equal(uploads.length,0);assert.equal(nativeCalls,0);
+  attach.syncNew(null,null,null,null,null,null,false,1);
+  assert.equal(nativeCalls,1);assert.deepEqual(uploads,[{path:'mock.pdf',id:'native-id'}]);
+  c.FileManager.GetFile=()=>({Size:5});
+  assert.throws(()=>attach.syncNew(null,null,null,null,null,null,false,1),/changed before/);
+  assert.equal(nativeCalls,1);assert.equal(uploads.length,1);
+});
+test('standard upload adapter preserves native data-collection registration without duplicating it', () => {
+  const files=[],uploads=[];
+  const attach={element:{setAttachNameByGroup(){}},appendTo(){},
+    fileBox:{files(){return files;},fileListAtGroup(){return files;}},addFiles(incoming){files.push(...incoming);},onrefresh(){},
+    syncNew:function(){
+      const ids=[];
+      for(let i=0;i<files.length;i++){
+        const file=files[i],id='synthetic-object-'+i;
+        if(file.atPc){this.appendTo();this.element.setAttachNameByGroup();if(file.misfileid)c.hsattach.AddFlashFile(file.path,id);}
+        ids.push(id);
+      }
+      return ids;
+    }};
+  const c=ctx({rInfo:{appType:'sancgian',applID:'2020'},Attach:attach,
+    HsFile:function(path,name,size){Object.assign(this,{path,name,size,atPc:true});},
+    hsattach:{AddFlashFile(path,id){uploads.push({path,id});}},FileManager:{GetFile(){return {Size:4};}}});
+  c.wxsAction('attach',{path:'normal.pdf',name:'normal.pdf',size:4,expected_count:0});
+  files.push({path:'collection.pdf',name:'collection.pdf',size:4,atPc:true,misfileid:'synthetic-collection'});
+  attach.syncNew();
+  assert.equal(uploads.length,2);
+  assert.deepEqual(uploads.map(item=>item.path).sort(),['collection.pdf','normal.pdf']);
 });
 console.log(`${count} action tests passed; no real application or network used.`);

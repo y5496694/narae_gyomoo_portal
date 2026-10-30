@@ -69,18 +69,22 @@ def safe_attachment_names(manifest):
         names.append(name.casefold())
 
 
-def export_attachments(window, expected_title, directory, native):
+def export_attachments(window, expected_title, directory, native, editable_draft=False):
     from wxs_runtime import Session
-    identity(window, expected_title)
+    if not editable_draft:
+        identity(window, expected_title)
     session = Session(window)
     if session.frame_errors:
         raise ValueError("Some document frames are unavailable")
-    before = readonly(session.docs, native)
+    before = session.require_draft(expected_title) if editable_draft else readonly(session.docs, native)
     manifest = session.action("attachment_manifest")
     safe_attachment_names(manifest)
     directory = directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
-    identity(window, expected_title)
+    if editable_draft:
+        session.require_draft(expected_title)
+    else:
+        identity(window, expected_title)
     result = session.action("attachment_export", {"directory": str(directory), "expected": manifest})
     files = []
     if len(result["saved"]) != len(manifest):
@@ -97,7 +101,8 @@ def export_attachments(window, expected_title, directory, native):
         files.append({"name": path.name, "path": str(path), "size": size, "exported": True,
                       "listed_size": entry["size"], "size_matches": not entry["size"] or size == entry["size"],
                       "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
-    if readonly(session.docs, native) != before:
+    after = session.require_draft(expected_title) if editable_draft else readonly(session.docs, native)
+    if after != before:
         raise ValueError("Editor state changed during attachment export")
     return {"files": files, "all_exported": all(f["exported"] for f in files),
             "coverage": "App Attach.saveFilesAs attempted for every attachment; file contents still require readers"}

@@ -14,6 +14,31 @@ import wxs_read
 
 
 class ReadTests(unittest.TestCase):
+    def test_editable_attachment_export_checks_full_state_and_file_bytes(self):
+        for changed in (False, True):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)/'download'
+                session = Mock(frame_errors=[])
+                state = {'title': '합성 기안', 'body': '본문', 'attachments': ['합성.pdf']}
+                session.require_draft.side_effect = [state, state, {**state, 'body': '다른 본문'} if changed else state]
+                manifest = [{'name': '합성.pdf', 'size': 4}]
+                def action(name, payload=None):
+                    if name == 'attachment_manifest': return manifest
+                    path = Path(payload['directory'])/'합성.pdf'
+                    path.write_bytes(b'test')
+                    return {'saved': [str(path)]}
+                session.action.side_effect = action
+                with patch('wxs_runtime.Session', return_value=session), patch('wxs_read.identity') as identity:
+                    if changed:
+                        with self.assertRaisesRegex(ValueError, 'state changed'):
+                            wxs_read.export_attachments({'hwnd': 1}, '합성 기안', directory, self.native(), True)
+                    else:
+                        result = wxs_read.export_attachments({'hwnd': 1}, '합성 기안', directory, self.native(), True)
+                        self.assertTrue(result['all_exported'])
+                        self.assertTrue(result['files'][0]['size_matches'])
+                        self.assertEqual(len(result['files'][0]['sha256']), 64)
+                    identity.assert_not_called()
+
     def test_cancelling_a_prepared_reader_never_claims_or_closes_a_window(self):
         with tempfile.TemporaryDirectory() as temp:
             marker, output = Path(temp)/'cancel', Path(temp)/'result.json'

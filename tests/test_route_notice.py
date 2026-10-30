@@ -5,10 +5,27 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'))
-from wxs_route_notice import prepare, acknowledge, inspect_notices, read_notice
+from wxs_route_notice import prepare, acknowledge, inspect_notices, read_notice, cancel_editor_switch
 
 
 class RouteNoticeTests(unittest.TestCase):
+    def test_editor_switch_cancels_only_one_exact_notice_for_unchanged_document(self):
+        self.session.status.return_value.update(hwp_title=self.title, is_modified=False)
+        buttons = self.children + [{'class': 'Button', 'text': '취소', 'hwnd': 5}]
+        message = '열려있는 기안/결재기를 닫습니다.'
+        for change in ('message', 'title', 'modified', 'buttons', 'multiple', 'none'):
+            with self.subTest(change=change):
+                self.runtime.press_dialog_button.reset_mock()
+                self.runtime.process_windows.return_value = [self.notice, self.notice] if change == 'multiple' else [self.notice]
+                self.runtime.alert_details.return_value = (message if change != 'message' else '다른 안내', buttons if change != 'buttons' else self.children)
+                self.session.status.return_value.update(title='다른 기안' if change == 'title' else self.title, is_modified=change == 'modified')
+                if change == 'none':
+                    self.assertTrue(cancel_editor_switch(self.session, self.title, self.runtime)['existing_editor_preserved'])
+                    self.runtime.press_dialog_button.assert_called_once_with(self.notice, buttons, '취소')
+                else:
+                    with self.assertRaises(ValueError): cancel_editor_switch(self.session, self.title, self.runtime)
+                    self.runtime.press_dialog_button.assert_not_called()
+
     def setUp(self):
         self.title = '합성 기안'
         self.person = '합성교장'

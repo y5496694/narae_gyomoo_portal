@@ -174,9 +174,10 @@ def approval_route_matches(rows, route):
         if not match or int(match[1]) in numbered:
             return False
         numbered[int(match[1])] = match[2]
-    if set(numbered) != set(range(1, len(route) + 2)) or not numbered[1].startswith("기안"):
+    first = min(numbered) if numbered else 0
+    if first < 1 or set(numbered) != set(range(first, first + len(route) + 1)) or not numbered[first].startswith("기안"):
         return False
-    return all(numbered[index + 2].startswith(person["role"]) and person["name"] in numbered[index + 2]
+    return all(numbered[first + index + 1].startswith(person["role"]) and person["name"] in numbered[first + index + 1]
                for index, person in enumerate(route))
 
 
