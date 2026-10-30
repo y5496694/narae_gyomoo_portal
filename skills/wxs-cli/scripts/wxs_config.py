@@ -1,13 +1,14 @@
 """Offline validation and plans. Does not import Windows/COM modules."""
 import json
 import hashlib
+import re
 from pathlib import Path
 
 VERSION = "0.4.0"
 PACK_ID = "narae_gyomoo_portal"
 FIELDS = {"expected_title", "title", "body", "body_file", "body_hwp", "task_card",
           "private_reasons", "approver", "recipient", "auto_send", "attachments",
-          "save_name"}
+          "save_name", "disclosure", "approval_route"}
 
 
 def exact_object(value, allowed, required, label):
@@ -85,6 +86,35 @@ def load_config(path):
                 len(reasons) != len(set(reasons))):
             raise ValueError("private_reasons must contain unique integers 1..8")
         data["private_reasons"] = sorted(reasons)
+    if "disclosure" in data:
+        if "private_reasons" in data:
+            raise ValueError("Use disclosure or private_reasons, not both")
+        disclosure = data["disclosure"]
+        exact_object(disclosure, {"mode", "reasons"}, {"mode", "reasons"}, "disclosure")
+        mode, reasons = disclosure["mode"], disclosure["reasons"]
+        if mode not in ("public", "partial", "private") or not isinstance(reasons, list) or any(type(n) is not int or n not in range(1, 9) for n in reasons) or len(reasons) != len(set(reasons)):
+            raise ValueError("Invalid disclosure mode/reasons")
+        if bool(reasons) != (mode != "public"):
+            raise ValueError("Partial/private disclosure requires reasons; public requires none")
+        disclosure["reasons"] = sorted(reasons)
+    if "approval_route" in data:
+        if "approver" in data:
+            raise ValueError("Use approval_route or approver, not both")
+        route = data["approval_route"]
+        if not isinstance(route, list) or not 1 <= len(route) <= 10:
+            raise ValueError("approval_route requires 1..10 participants")
+        seen = set()
+        for index, person in enumerate(route):
+            exact_object(person, {"name", "id", "role"}, {"name", "role"}, "approval_route participant")
+            for key in ("name", "id"):
+                if key in person:
+                    string(person[key], "approval_route." + key)
+            if person["role"] != ("결재" if index == len(route) - 1 else "검토"):
+                raise ValueError("approval_route must end in 결재 after 검토 participants")
+            identity = person.get("id", person["name"])
+            if identity in seen:
+                raise ValueError("Duplicate approval participant")
+            seen.add(identity)
     if "approver" in data:
         exact_object(data["approver"], {"name", "id"}, {"name"}, "approver")
         for key, value in data["approver"].items():
@@ -114,7 +144,7 @@ def load_config(path):
 
 def plan(config):
     steps = ["title"]
-    for key in ("body", "body_hwp", "private_reasons", "task_card", "approver", "recipient", "auto_send"):
+    for key in ("body", "body_hwp", "private_reasons", "disclosure", "task_card", "approver", "approval_route", "recipient", "auto_send"):
         if key in config:
             steps.append(key)
     if config["attachments"]:
@@ -132,6 +162,20 @@ def plan(config):
 
 def normalize_text(value):
     return value.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def approval_route_matches(rows, route):
+    """The live table may display descending sequence; verify its actual numbers."""
+    numbered = {}
+    for row in rows:
+        match = re.match(r"^\s*(\d+)\s*(.*)$", row, re.S)
+        if not match or int(match[1]) in numbered:
+            return False
+        numbered[int(match[1])] = match[2]
+    if set(numbered) != set(range(1, len(route) + 2)) or not numbered[1].startswith("기안"):
+        return False
+    return all(numbered[index + 2].startswith(person["role"]) and person["name"] in numbered[index + 2]
+               for index, person in enumerate(route))
 
 
 def replacement_dialog(text, name):

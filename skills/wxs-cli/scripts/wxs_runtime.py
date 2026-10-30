@@ -9,7 +9,7 @@ import win32gui
 import win32process
 
 import wxs_native as native
-from wxs_config import normalize_text, replacement_dialog, verify_attachment
+from wxs_config import normalize_text, replacement_dialog, verify_attachment, approval_route_matches
 
 
 class DraftFailure(RuntimeError):
@@ -203,7 +203,7 @@ class Session:
                     raise ValueError("Formatted insertion requires an empty body before changes")
             for file in config["attachments"]:
                 verify_attachment(file)
-            if "approver" in config and len(before["approval_rows"]) != 1:
+            if ("approver" in config or "approval_route" in config) and len(before["approval_rows"]) != 1:
                 raise ValueError("Expected a drafter-only approval line before changes")
             if "recipient" in config and before["recipient"]:
                 raise ValueError("Expected an empty recipient list before changes")
@@ -236,6 +236,12 @@ class Session:
                 if not status["private"] or status["private_reasons"] != config["private_reasons"]:
                     raise ValueError("Non-disclosure reasons readback mismatch")
                 completed.append(attempted)
+            if "disclosure" in config:
+                attempted = "disclosure"
+                status = self.action("disclosure", config["disclosure"])
+                if status["disclosure"] != config["disclosure"]["mode"] or status["private_reasons"] != config["disclosure"]["reasons"]:
+                    raise ValueError("Disclosure readback mismatch")
+                completed.append(attempted)
             if "task_card" in config:
                 attempted = "task_card"
                 window, root = self.open_modal("open_task", path_suffix="taskChoiseTaskNexacroRP.do")
@@ -243,6 +249,15 @@ class Session:
                 self.wait_closed(window)
                 if config["task_card"] not in self.action("status")["task_card"]:
                     raise ValueError("Task card readback mismatch")
+                completed.append(attempted)
+            if "approval_route" in config:
+                attempted = "approval_route"
+                window, root = self.open_modal("open_approval", title_contains="결재경로")
+                self.action("approval_route", {"route": config["approval_route"]}, root)
+                self.wait_closed(window)
+                rows = self.action("status")["approval_rows"]
+                if not approval_route_matches(rows, config["approval_route"]):
+                    raise ValueError("Approval route order/role readback mismatch")
                 completed.append(attempted)
             if "approver" in config:
                 attempted = "approver"

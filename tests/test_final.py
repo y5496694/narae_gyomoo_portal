@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'))
-from wxs_final import prepare, apply, confirm
+from wxs_final import prepare, apply, confirm, INTERNAL_CONFIRM, processing_preview, process, audit_processing_rejection, acknowledge, COMPLETION_NOTICE
 from wxs_cli import parser, run
 
 
@@ -116,6 +116,104 @@ class FinalTests(unittest.TestCase):
                 f = Path(tmp) / 'r.json'; apply(s, p, p['fingerprint'], f, True)
                 with self.assertRaises(ValueError): confirm(f, message, True, runtime)
                 runtime.press_dialog_button.assert_not_called()
+
+    def test_internal_prompt_requires_same_document_and_internal_recipient_then_allows_final_prompt(self):
+        s = self.session(); s.status.return_value['recipient'] = '내부결재'
+        p = prepare(s, 'submit', '합성 문서', '상신')
+        runtime = SimpleNamespace(Session=Mock(return_value=s), process_windows=Mock(return_value=[{'hwnd': 30, 'title': '웹 페이지 메시지'}]),
+                                  alert_details=Mock(return_value=(INTERNAL_CONFIRM, [])), press_dialog_button=Mock())
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json'; apply(s,p,p['fingerprint'],f,True)
+            self.assertFalse(confirm(f,INTERNAL_CONFIRM,True,runtime)['completed'])
+            with self.assertRaises(ValueError): confirm(f,INTERNAL_CONFIRM,True,runtime)
+            self.assertEqual(runtime.press_dialog_button.call_count,1)
+            runtime.alert_details.return_value=('결재올림하시겠습니까?',[])
+            confirm(f,'결재올림하시겠습니까?',True,runtime)
+            self.assertEqual(runtime.press_dialog_button.call_count,2)
+
+    def test_internal_prompt_rejects_external_recipient_or_changed_route(self):
+        for changed in ('recipient','approval_rows'):
+            s=self.session(); s.status.return_value['recipient']='내부결재'
+            p=prepare(s,'submit','합성 문서','상신')
+            runtime=SimpleNamespace(Session=Mock(return_value=s),process_windows=Mock(return_value=[{'hwnd':30,'title':'웹 페이지 메시지'}]),alert_details=Mock(return_value=(INTERNAL_CONFIRM,[])),press_dialog_button=Mock())
+            with tempfile.TemporaryDirectory() as tmp:
+                f=Path(tmp)/'receipt.json'; apply(s,p,p['fingerprint'],f,True)
+                s.status.return_value[changed]='외부기관' if changed=='recipient' else ['다른 결재자']
+                with self.assertRaises(ValueError): confirm(f,INTERNAL_CONFIRM,True,runtime)
+                runtime.press_dialog_button.assert_not_called()
+
+    def test_site_preparation_requires_reviewed_new_preview_and_keeps_original_attempt(self):
+        from wxs_final import inspect_dialog
+        s=self.session();s.status.return_value['recipient']='내부결재'
+        p=prepare(s,'submit','합성 문서','상신')
+        runtime=SimpleNamespace(Session=Mock(return_value=s),process_windows=Mock(return_value=[{'hwnd':30,'title':'웹 페이지 메시지'}]),alert_details=Mock(return_value=(INTERNAL_CONFIRM,[])),press_dialog_button=Mock())
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json';apply(s,p,p['fingerprint'],f,True)
+            s.status.return_value['document_text'] += '\n기관 기본 연락처'
+            with self.assertRaises(ValueError):confirm(f,INTERNAL_CONFIRM,True,runtime)
+            preview=inspect_dialog(f,runtime)['document_preview']
+            with self.assertRaises(ValueError):confirm(f,INTERNAL_CONFIRM,True,runtime,'wrong-preview')
+            result=confirm(f,INTERNAL_CONFIRM,True,runtime,preview['fingerprint'])
+            self.assertEqual(result['fingerprint'],p['fingerprint'])
+            self.assertEqual(result['internal_confirmation_fingerprint'],preview['fingerprint'])
+            runtime.press_dialog_button.assert_called_once()
+
+    def test_processing_form_is_bound_to_document_state_and_clicked_once(self):
+        s=self.session();p=prepare(s,'submit','합성 문서','상신')
+        form={'title':'문서처리','text':'결재올림 확인','fields':[],'button':{'id':'aSubmit','label':'확인','disabled':False}}
+        root=SimpleNamespace(url='https://synthetic.invalid/bms/cz/cb/snd/retrieveDocSanctn.do')
+        runtime=SimpleNamespace(Session=Mock(return_value=s),native=SimpleNamespace(documents=Mock(return_value=([([],root)],[]))),process_windows=Mock(return_value=[{'hwnd':30,'pid':20,'title':'문서처리'}]))
+        def action(name,*args,**kwargs):
+            if name=='final_buttons':return [{'index':1,'label':'상신','disabled':False}]
+            if name=='processing_status':return copy.deepcopy(form)
+            return {'scheduled':True}
+        s.action.side_effect=action
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json';apply(s,p,p['fingerprint'],f,True)
+            preview=processing_preview(f,runtime)
+            form['fields'].append({'id':'changed','value':'x'})
+            with self.assertRaisesRegex(ValueError,'changed'):process(f,preview,preview['fingerprint'],True,runtime)
+            self.assertFalse(json.loads(f.read_text('utf-8')).get('processing_attempted'))
+            form['fields'].clear()
+            self.assertFalse(process(f,preview,preview['fingerprint'],True,runtime)['completed'])
+            with self.assertRaises(ValueError):process(f,preview,preview['fingerprint'],True,runtime)
+            self.assertEqual([call.args[0] for call in s.action.call_args_list].count('processing_click'),1)
+
+    def test_processing_dialog_wrong_origin_is_not_usable(self):
+        s=self.session();p=prepare(s,'submit','합성 문서','상신')
+        root=SimpleNamespace(url='https://other.invalid/bms/cz/cb/snd/retrieveDocSanctn.do')
+        runtime=SimpleNamespace(Session=Mock(return_value=s),native=SimpleNamespace(documents=Mock(return_value=([([],root)],[]))),process_windows=Mock(return_value=[{'hwnd':30,'pid':20,'title':'문서처리'}]))
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json';apply(s,p,p['fingerprint'],f,True)
+            with self.assertRaisesRegex(ValueError,'origin'):processing_preview(f,runtime)
+
+    def test_legacy_rejection_audit_requires_unchanged_state_and_cannot_reset_new_attempts(self):
+        root=SimpleNamespace(url='https://synthetic.invalid/retrieveDocSanctn.do')
+        s=self.session();s.action.return_value={'exact_state':True,'legacy_gate_passed':False}
+        runtime=SimpleNamespace(Session=Mock(return_value=s),native=SimpleNamespace(documents=Mock(return_value=([([],root)],[]))))
+        preview={'fingerprint':'original','binding':{'window':{'hwnd':30},'form':{}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json'
+            receipt={'window':{'hwnd':10},'processing_attempted':True,'processing_fingerprint':'original'}
+            f.write_text(json.dumps(receipt),'utf-8')
+            with patch('wxs_final.processing_preview',return_value=preview):
+                result=audit_processing_rejection(f,runtime)
+            self.assertTrue(result['processing_rejected_before_click'])
+            receipt['processing_gate_version']=2;f.write_text(json.dumps(receipt),'utf-8')
+            with self.assertRaises(ValueError):audit_processing_rejection(f,runtime)
+            receipt.pop('processing_gate_version');f.write_text(json.dumps(receipt),'utf-8')
+            preview['fingerprint']='changed'
+            with patch('wxs_final.processing_preview',return_value=preview),self.assertRaises(ValueError):audit_processing_rejection(f,runtime)
+
+    def test_completion_acknowledgment_only_closes_exact_notice_once(self):
+        runtime=SimpleNamespace(process_windows=Mock(return_value=[{'hwnd':30,'title':'웹 페이지 메시지'}]),alert_details=Mock(return_value=(COMPLETION_NOTICE,[])),press_dialog_button=Mock())
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'receipt.json';f.write_text(json.dumps({'status':'verification_required','processing_attempted':True,'window':{'pid':20},'fingerprint':'original'}),'utf-8')
+            with self.assertRaises(ValueError):acknowledge(f,'상신하시겠습니까?',runtime)
+            runtime.press_dialog_button.assert_not_called()
+            self.assertFalse(acknowledge(f,COMPLETION_NOTICE,runtime)['completed'])
+            with self.assertRaises(ValueError):acknowledge(f,COMPLETION_NOTICE,runtime)
+            runtime.press_dialog_button.assert_called_once()
 
     def test_cli_missing_authorization_fails_before_native_initialization(self):
         args = parser().parse_args(['final-action', '--hwnd', '10', '--operation', 'submit',

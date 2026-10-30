@@ -7,7 +7,7 @@ from pathlib import Path
 import platform
 import sys
 
-from wxs_config import PACK_ID, VERSION, load_config, plan, string
+from wxs_config import PACK_ID, VERSION, load_config, plan, string, approval_route_matches
 
 
 def parser():
@@ -35,6 +35,16 @@ def parser():
     capture.add_argument("--directory", type=Path, required=True)
     capture.add_argument("--dpi", type=int, default=150)
     capture.add_argument("--out", type=Path)
+    options = commands.add_parser("draft-options", help="Observe draft disclosure controls or open the approval selector without selecting people")
+    options.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    options.add_argument("--expected-title", required=True)
+    options.add_argument("--section", choices=("approval", "disclosure", "task"), required=True)
+    options.add_argument("--dialog-hwnd", type=lambda value: int(value, 0), help="Observe the already open approval dialog from a previous result")
+    options.add_argument("--close", action="store_true", help="Close only the observed unchanged drafter-only approval selector")
+    options.add_argument("--task-card", help="Select this exact candidate in the observed open task dialog, with --apply")
+    options.add_argument("--confirm-route", type=Path, help="Confirm only an already selected route matching this draft config; never add people")
+    options.add_argument("--apply", action="store_true")
+    options.add_argument("--out", type=Path)
     for name in ("inspect", "text", "attachments", "attachment-status", "export-attachments", "draft-status", "draft", "save-draft"):
         command = commands.add_parser(name)
         command.add_argument("--hwnd", type=lambda value: int(value, 0),
@@ -65,10 +75,22 @@ def parser():
     final.add_argument("--out", type=Path)
     dialog = commands.add_parser("final-dialog", help="Read the attempted final action's actual native message without accepting it")
     dialog.add_argument("--receipt", type=Path, required=True)
+    dialog.add_argument("--out", type=Path)
     confirm = commands.add_parser("final-confirm", help="Accept one exact observed operation-specific native confirmation")
     confirm.add_argument("--receipt", type=Path, required=True)
     confirm.add_argument("--expected-message", required=True)
+    confirm.add_argument("--expected-fingerprint", help="The reviewed final-dialog document preview after the site's draft preparation")
     confirm.add_argument("--confirm-final-action", action="store_true")
+    processing = commands.add_parser("final-process", help="Review or explicitly confirm the same attempted submission's observed document-processing form")
+    processing.add_argument("--receipt", type=Path, required=True)
+    processing.add_argument("--apply", action="store_true")
+    processing.add_argument("--expected-fingerprint")
+    processing.add_argument("--confirm-final-action", action="store_true")
+    processing.add_argument("--out", type=Path)
+    processing.add_argument("--audit-rejection", action="store_true", help="Prove only an unchanged legacy array guard rejected before click; preserve the original attempt lock")
+    ack = commands.add_parser("final-ack", help="Dismiss only the exact observed completion notice, without making a decision")
+    ack.add_argument("--receipt", type=Path, required=True)
+    ack.add_argument("--expected-message", required=True)
     return root
 
 
@@ -87,6 +109,15 @@ def run(args):
             raise ValueError("Applying a final action requires --confirm-final-action, --expected-fingerprint and --receipt")
     if args.command == "final-confirm" and not args.confirm_final_action:
         raise ValueError("Native final confirmation requires --confirm-final-action")
+    if args.command == "final-process" and args.apply and (not args.confirm_final_action or not args.expected_fingerprint):
+        raise ValueError("Processing confirmation requires --confirm-final-action and --expected-fingerprint")
+    if args.command == "final-process" and args.audit_rejection and args.apply:
+        raise ValueError("Rejection audit cannot click or be combined with --apply")
+    if args.command == "draft-options" and (args.task_card or args.confirm_route or args.apply):
+        task_apply = args.section == "task" and args.task_card and not args.confirm_route
+        route_apply = args.section == "approval" and args.confirm_route and not args.task_card
+        if not (task_apply or route_apply) or not args.apply or not args.dialog_hwnd or args.close:
+            raise ValueError("Selection requires the matching section, observed --dialog-hwnd, one task-card/confirm-route and --apply")
     config = load_config(args.config) if args.command == "draft" else None
     if args.command == "save-draft":
         string(args.name, "name")
@@ -117,11 +148,79 @@ def run(args):
             import wxs_runtime
             from wxs_final import inspect_dialog
             return inspect_dialog(args.receipt, wxs_runtime)
+        if args.command == "final-process":
+            import wxs_runtime
+            from wxs_final import processing_preview, process, audit_processing_rejection
+            if args.audit_rejection:
+                return audit_processing_rejection(args.receipt, wxs_runtime)
+            preview = processing_preview(args.receipt, wxs_runtime)
+            if not args.apply:
+                return preview
+            return process(args.receipt, preview, args.expected_fingerprint, args.confirm_final_action, wxs_runtime)
+        if args.command == "final-ack":
+            import wxs_runtime
+            from wxs_final import acknowledge
+            return acknowledge(args.receipt, args.expected_message, wxs_runtime)
         if args.command == "final-confirm":
             import wxs_runtime
             from wxs_final import confirm
-            return confirm(args.receipt, args.expected_message, args.confirm_final_action, wxs_runtime)
+            return confirm(args.receipt, args.expected_message, args.confirm_final_action, wxs_runtime, args.expected_fingerprint)
         window = native.select_window(args)
+        if args.command == "draft-options":
+            from wxs_runtime import Session
+            session = Session(window)
+            if args.dialog_hwnd:
+                status = session.status()
+                if args.section not in ("approval", "task") or status["title"] != args.expected_title or status["app_type"] != "sancgian" or status["processed"] is not False or status["edit_mode"] != 2 or session.frame_errors:
+                    raise ValueError("Expected the same editable draft")
+                from wxs_runtime import process_windows
+                matches = [item for item in process_windows(window["pid"]) if item["hwnd"] == args.dialog_hwnd and (args.section == "task" or "결재경로" in item["title"])]
+                if len(matches) != 1:
+                    raise ValueError("Expected the observed approval dialog in the same process")
+                docs, errors = native.documents(matches[0])
+                root = docs[0][1]
+                from urllib.parse import urlsplit
+                parsed = urlsplit(str(root.url))
+                kind = "open_task" if args.section == "task" else "open_approval"
+                if errors or parsed.netloc != session.origin_path.netloc or (args.section == "task" and not parsed.path.endswith("taskChoiseTaskNexacroRP.do")) or not session.action("ready", {"kind": kind}, root):
+                    raise ValueError("Approval dialog identity or controls changed")
+                if args.section == "task":
+                    if args.close:
+                        raise ValueError("Closing task selectors is unsupported")
+                    if args.apply:
+                        session.action("task_select", {"name": args.task_card}, root)
+                        session.wait_closed(matches[0])
+                        after = session.status()
+                        if args.task_card not in after["task_card"]:
+                            raise ValueError("Task card readback mismatch")
+                        return {"applied": True, "status": after}
+                    return {"window": matches[0], "options": session.action("task_options", root=root)}
+                if args.confirm_route:
+                    config = load_config(args.confirm_route)
+                    if set(config) - {"expected_title", "title", "approval_route", "attachments"} or config["attachments"] or "approval_route" not in config or config["expected_title"] != args.expected_title or config["title"] != args.expected_title or len(status["approval_rows"]) != 1:
+                        raise ValueError("Route confirmation requires the same drafter-only document and a route-only config")
+                    session.action("approval_route_confirm", {"route": config["approval_route"]}, root)
+                    session.wait_closed(matches[0])
+                    after = session.status()
+                    rows = after["approval_rows"]
+                    if not approval_route_matches(rows, config["approval_route"]):
+                        raise ValueError("Approval route readback mismatch")
+                    return {"applied": True, "status": after}
+                if args.close:
+                    session.action("approval_cancel", root=root)
+                    session.wait_closed(matches[0])
+                    return {"closed": True, "status": session.status()}
+                return {"window": matches[0], "options": session.action("approval_options", root=root)}
+            if args.close:
+                raise ValueError("Closing requires the observed --dialog-hwnd")
+            session.require_draft(args.expected_title)
+            if args.section == "disclosure":
+                return {"controls": session.action("disclosure_options")}
+            if args.section == "task":
+                modal, root = session.open_modal("open_task", path_suffix="taskChoiseTaskNexacroRP.do")
+                return {"window": modal, "options": session.action("task_options", root=root)}
+            modal, root = session.open_modal("open_approval", title_contains="결재경로")
+            return {"window": modal, "options": session.action("approval_options", root=root)}
         if args.command == "final-action":
             from wxs_runtime import Session
             from wxs_final import prepare, apply

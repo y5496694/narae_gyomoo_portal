@@ -8,7 +8,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from wxs_config import load_config, plan, replacement_dialog
+from wxs_config import load_config, plan, replacement_dialog, approval_route_matches
 
 
 class ConfigTests(unittest.TestCase):
@@ -89,6 +89,28 @@ class ConfigTests(unittest.TestCase):
     def test_auto_send_only_true(self):
         for value in (False, 'true', 1, None):
             with self.subTest(value=value), self.assertRaises(ValueError): self.load(auto_send=value)
+
+    def test_explicit_disclosure_modes_and_reason_consistency(self):
+        self.assertEqual(self.load(disclosure={'mode': 'partial', 'reasons': [6]})['disclosure']['mode'], 'partial')
+        for disclosure in ({'mode': 'partial', 'reasons': []}, {'mode': 'public', 'reasons': [6]}, {'mode': 'private', 'reasons': [True]}, {'mode': 'private', 'reasons': [6, 6]}, {'mode': 'unknown', 'reasons': []}):
+            with self.subTest(disclosure=disclosure), self.assertRaises(ValueError): self.load(disclosure=disclosure)
+        with self.assertRaises(ValueError): self.load(disclosure={'mode': 'partial', 'reasons': [6]}, private_reasons=[6])
+
+    def test_approval_route_roles_duplicates_and_conflicting_legacy_field(self):
+        route = [{'name': '가상 연구부장', 'role': '검토'}, {'name': '가상 교장', 'role': '결재'}]
+        self.assertIn('approval_route', plan(self.load(approval_route=route))['steps'])
+        invalid = [[], [route[0]], [route[1], route[1]], [{'name': 'x', 'role': '검토'}, {'name': 'x', 'role': '결재'}]]
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(ValueError): self.load(approval_route=value)
+        with self.assertRaises(ValueError): self.load(approval_route=route, approver={'name': '가상 교장'})
+
+    def test_approval_readback_uses_sequence_numbers_in_either_display_order(self):
+        route = [{'name': '가상 부장', 'role': '검토'}, {'name': '가상 교장', 'role': '결재'}]
+        rows = ['1기안교사기안자 대기', '2검토부장가상 부장 대기', '3결재교장가상 교장 대기']
+        self.assertTrue(approval_route_matches(rows, route))
+        self.assertTrue(approval_route_matches(list(reversed(rows)), route))
+        for invalid in ([rows[0], rows[1], rows[1]], [rows[0], rows[1], '3검토교장가상 교장 대기'], [rows[0], '3검토부장가상 부장 대기', '2결재교장가상 교장 대기']):
+            self.assertFalse(approval_route_matches(invalid, route))
 
     def test_exact_replacement_prompt(self):
         message = "임시보관함에 이미 '가상 초안' 문서가 있습니다.\n기존 문서를 이 문서로 바꾸시겠습니까?"

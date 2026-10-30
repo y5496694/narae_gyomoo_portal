@@ -59,6 +59,51 @@ test('recipient requires full exact name and preserves an existing list', () => 
   c.wxsAction('recipient_select',{name:'가상교육청 가상센터'}); c.flush();assert.equal(clicked,1);assert.equal(verified,1);
   assert.throws(()=>c.wxsAction('recipient_select',{name:'가상교육청 가상센터'}),/list changed/);
 });
+function routeFixture() {
+  const participants=[{ID:'drafter'}], selects={};let selected=null, verified=0;
+  const names=['가상 연구부장','가상 교감','가상 교장'];
+  const radios=names.map((name,index)=>({type:'radio',name:'partSelRadio',value:name,id:'person-'+index,click(){selected=this;}}));
+  const c=ctx({rInfo:{appType:'sancgian'},frames:[{document:{getElementsByTagName(){return radios;}}}],
+    document:{getElementById(id){return selects[id];},getElementsByTagName(){return [];}},
+    PrtcpList:{toArray(){return participants;}},fncAdd(){
+      const index=participants.length;
+      if(index>1){selects['draft'+(index-1)].value='review';participants[index-1].role='review';}
+      participants.push({ID:selected.id,name:selected.value,role:'approve'});
+      selects['draft'+index]={value:'approve',parentNode:{parentNode:{innerText:selected.value}},options:[{text:'검토',value:'review'},{text:'결재',value:'approve'}]};
+    },fncVerify(){verified++;}});
+  return {c,participants,radios,selects,verified:()=>verified,route:names.map((name,index)=>({name,id:'person-'+index,role:index===2?'결재':'검토'}))};
+}
+test('approval route preserves drafter, appends exact people in order and uses native role choices', () => {
+  const f=routeFixture();f.c.wxsAction('approval_route',{route:f.route});
+  assert.equal(f.verified(),0);f.c.flush();assert.equal(f.verified(),1);
+  assert.deepEqual(f.participants,[{ID:'drafter'},{ID:'person-0',name:'가상 연구부장',role:'review'},{ID:'person-1',name:'가상 교감',role:'review'},{ID:'person-2',name:'가상 교장',role:'approve'}]);
+});
+test('approval route resolves every person before adding and never overwrites existing people', () => {
+  for(const issue of ['missing','duplicate','drafter','existing','wrong-role']) {
+    const f=routeFixture();
+    if(issue==='missing')f.route[2].name='없는 사용자';
+    if(issue==='duplicate')f.route[1]={...f.route[0]};
+    if(issue==='drafter')f.radios[0].id='drafter';
+    if(issue==='existing')f.participants.push({ID:'existing'});
+    if(issue==='wrong-role')f.route[0].role='결재';
+    const count=f.participants.length;
+    assert.throws(()=>f.c.wxsAction('approval_route',{route:f.route}));f.c.flush();
+    assert.equal(f.participants.length,count);assert.equal(f.verified(),0);
+  }
+});
+test('unexpected native add order stops before approval confirmation', () => {
+  const f=routeFixture();f.c.fncAdd=()=>f.participants.push({ID:'wrong-person'});
+  assert.throws(()=>f.c.wxsAction('approval_route',{route:f.route}),/order changed/);
+  f.c.flush();assert.equal(f.verified(),0);
+});
+test('partial disclosure uses the observed radio and exact requested reasons', () => {
+  const els={};
+  for(let i=1;i<=3;i++)els['othbcLmtt'+i]={checked:i===3,click(){for(let j=1;j<=3;j++)els['othbcLmtt'+j].checked=j===i;}};
+  for(let i=1;i<=8;i++)els['othbcAt'+i]={checked:i===3,click(){this.checked=!this.checked;}};
+  const c=ctx({rInfo:{appType:'sancgian'},document:{getElementById(id){return els[id];},getElementsByTagName(){return [];}}});
+  const result=c.wxsAction('disclosure',{mode:'partial',reasons:[6]});
+  assert.equal(result.disclosure,'partial');assert.equal(result.private,false);assert.equal(JSON.stringify(result.private_reasons),'[6]');
+});
 test('private reasons uncheck reasons not requested', () => {
   const els={othbcLmtt3:{checked:false,click(){this.checked=!this.checked;}}};
   for(let i=1;i<=8;i++)els['othbcAt'+i]={checked:i===3,click(){this.checked=!this.checked;}};
@@ -85,6 +130,22 @@ test('attachment action keeps native validation and verifies rejection', () => {
 test('Prototype-style Array.toJSON does not turn output arrays into strings', () => {
   const c=ctx(); const result=vm.runInContext('Array.prototype.toJSON=function(){return "bad";}; JSON.stringify(wxsPlain({rows:[{name:"mock"}],empty:[]}));',c);
   assert.deepEqual(JSON.parse(result),{rows:[{name:'mock'}],empty:[]});
+});
+test('processing confirmation uses only the observed same form and excludes script content', () => {
+  let clicked=0,removed=0;
+  const button={innerText:'확인',disabled:false,getBoundingClientRect(){return {left:0,right:40,top:0,bottom:20};},click(){clicked++;}};
+  const secretScript={parentNode:{removeChild(){removed++;}}};
+  const fields=[{id:'enfcmtRules',name:'enfcmtRules',type:'checkbox',value:'on',checked:false,disabled:false,getBoundingClientRect(){return {left:0,right:10,top:0,bottom:10};}}];
+  const clone={get innerText(){return removed?'결재올림 확인':'secret script';},querySelectorAll(){return [secretScript];}};
+  const c=ctx({location:{pathname:'/bms/cz/cb/snd/retrieveDocSanctn.do'},document:{title:'문서처리',body:{cloneNode(){return clone;}},getElementById(id){return id==='aSubmit'?button:null;},querySelectorAll(){return fields;}}});
+  const state=c.wxsAction('processing_status',{});assert.equal(state.text,'결재올림 확인');
+  fields[0].checked=true;assert.throws(()=>c.wxsAction('processing_click',{expected:state}),/changed/);assert.equal(clicked,0);
+  const posting=c.wxsAction('processing_status',{});assert.throws(()=>c.wxsAction('processing_click',{expected:posting}),/posting/);
+  fields[0].checked=false;const current=c.wxsAction('processing_status',{}),serialized=JSON.stringify(current);
+  vm.runInContext('Array.prototype.toJSON=function(){return "legacy-array";};',c);
+  const expected=vm.runInContext('JSON.parse('+JSON.stringify(serialized)+')',c);
+  const proof=c.wxsAction('processing_preflight',{expected});assert.equal(proof.exact_state,true);assert.equal(proof.legacy_gate_passed,false);
+  c.wxsAction('processing_click',{expected});c.flush();assert.equal(clicked,1);
 });
 test('temporary save calls only the temporary-save handler', () => {
   let opened=0,saved=0;const input={value:''};const c=ctx({rInfo:{appType:'sancgian'},fncSaveTmpr(){opened++;},fncSave(){saved++;},document:{getElementById(){return input;}}});

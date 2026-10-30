@@ -10,6 +10,31 @@ function wxsAction(action, p) {
         need(typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed,
              "Expected an unprocessed sancgian draft");
     }
+    if (action === "processing_status" || action === "processing_click" || action === "processing_preflight") {
+        need(/\/retrieveDocSanctn\.do$/.test(String(location.pathname)), "Expected the observed document-processing route");
+        var fields = [], processingInputs = document.querySelectorAll("input,select,textarea"), submit = el("aSubmit");
+        for (var pf = 0; pf < processingInputs.length; pf++) {
+            var input = processingInputs[pf], rect = input.getBoundingClientRect(), style = input.currentStyle || {};
+            if (String(input.type).toLowerCase() === "hidden") continue;
+            fields.push({id: String(input.id), name: String(input.name), type: String(input.type), value: input.type === "password" ? "[비밀번호]" : String(input.value), checked: !!input.checked, disabled: !!input.disabled,
+                         visible: rect.right > rect.left && rect.bottom > rect.top && style.display !== "none" && style.visibility !== "hidden"});
+        }
+        var sr = submit.getBoundingClientRect();
+        need(sr.right > sr.left && sr.bottom > sr.top, "Processing confirmation is not visible");
+        var displayClone = document.body.cloneNode(true), nonDisplay = displayClone.querySelectorAll("script,style,noscript,object");
+        for (var nd = nonDisplay.length - 1; nd >= 0; nd--) nonDisplay[nd].parentNode.removeChild(nonDisplay[nd]);
+        var state = {title: String(document.title), text: String(displayClone.innerText || displayClone.textContent).replace(/^\s+|\s+$/g, "").slice(0, 20000), fields: fields, button: {id: "aSubmit", label: String(submit.innerText).replace(/^\s+|\s+$/g, ""), disabled: !!submit.disabled}};
+        if (action === "processing_status") return state;
+        var exactState = JSON.stringify(wxsPlain(state)) === JSON.stringify(wxsPlain(p.expected));
+        if (action === "processing_preflight") return {exact_state: exactState, legacy_gate_passed: JSON.stringify(wxsPlain(state)) === JSON.stringify(p.expected)};
+        need(exactState, "Processing form changed after preview");
+        need(state.button.label === "확인" && !state.button.disabled, "Observed processing confirmation changed");
+        for (var sp = 0; sp < fields.length; sp++) {
+            need(fields[sp].type !== "password" || !fields[sp].visible, "A password control requires direct user authentication");
+            need(fields[sp].id !== "enfcmtRules" || !fields[sp].checked, "Public notice posting is outside this processing confirmation");
+        }
+        return later(function() { submit.click(); });
+    }
     if (action === "final_buttons" || action === "final_click") {
         var controls = document.getElementsByTagName("*"), finalButtons = [], targets = [];
         for (var fi = 0; fi < controls.length; fi++) {
@@ -74,8 +99,10 @@ function wxsAction(action, p) {
                 processed: typeof rInfo === "object" && rInfo.docProcessed != null ? !!rInfo.docProcessed : null,
                 title: document.getElementById("Sj") ? String(el("Sj").value) : null,
                 task_card: txt("referTaskTable"), private: document.getElementById("othbcLmtt3") ? !!el("othbcLmtt3").checked : null,
+                disclosure: document.getElementById("othbcLmtt1") && el("othbcLmtt1").checked ? "public" : document.getElementById("othbcLmtt2") && el("othbcLmtt2").checked ? "partial" : document.getElementById("othbcLmtt3") && el("othbcLmtt3").checked ? "private" : null,
                 private_reasons: reasons, approval_rows: rows, recipient: txt("recpList"),
-                auto_send: document.getElementById("autoSendGian") ? !!el("autoSendGian").checked : null};
+                auto_send: document.getElementById("autoSendGian") ? !!el("autoSendGian").checked : null,
+                final_buttons: wxsAction("final_buttons", {})};
     }
     if (action === "private") {
         requireDraft();
@@ -84,6 +111,19 @@ function wxsAction(action, p) {
             var want = false;
             for (var k = 0; k < p.reasons.length; k++) if (p.reasons[k] === n) want = true;
             if (!!el("othbcAt" + n).checked !== want) el("othbcAt" + n).click();
+        }
+        return wxsAction("status", {});
+    }
+    if (action === "disclosure") {
+        requireDraft();
+        var disclosureIds = {"public": "othbcLmtt1", "partial": "othbcLmtt2", "private": "othbcLmtt3"};
+        need(disclosureIds[p.mode], "Unsupported disclosure mode");
+        var disclosureRadio = el(disclosureIds[p.mode]);
+        if (!disclosureRadio.checked) disclosureRadio.click();
+        for (var dr = 1; dr <= 8; dr++) {
+            var requested = false;
+            for (var dk = 0; dk < p.reasons.length; dk++) if (p.reasons[dk] === dr) requested = true;
+            if (!!el("othbcAt" + dr).checked !== requested) el("othbcAt" + dr).click();
         }
         return wxsAction("status", {});
     }
@@ -101,7 +141,92 @@ function wxsAction(action, p) {
         need(typeof form.Tab00_Tabpage1_divAuth_btnAuthC01_onclick === "function", "Task confirmation handler missing");
         return later(function() { form.Tab00_Tabpage1_divAuth_btnAuthC01_onclick(); });
     }
+    if (action === "task_options") {
+        need(typeof nexacro !== "undefined", "Nexacro task form not loaded");
+        var taskForm = nexacro.getApplication().mainframe.QuickViewFrame.form, taskNames = [];
+        need(taskForm.dsAList, "Task dataset unavailable");
+        for (var ti = 0; ti < taskForm.dsAList.rowcount; ti++) taskNames.push(String(taskForm.dsAList.getColumn(ti, "tkcrdNm")));
+        return {candidates: taskNames};
+    }
     if (action === "open_approval") { requireDraft(); need(typeof fncReportCours === "function", "Approval handler missing"); return later(function() { fncReportCours(); }); }
+    if (action === "approval_options") {
+        need(typeof PrtcpList !== "undefined", "Approval form unavailable");
+        var options = [], people = [];
+        for (var af = 0; af <= frames.length; af++) {
+            var ad = af === frames.length ? document : frames[af].document;
+            var inputs = ad.getElementsByTagName("input"), selects = ad.getElementsByTagName("select");
+            for (var ap = 0; ap < inputs.length; ap++) {
+                var input = inputs[ap];
+                if (input.type === "radio" && input.name === "partSelRadio") people.push({name: String(input.value), id: String(input.id), row: String(input.parentNode.parentNode.innerText)});
+                else if (input.type === "radio") options.push({tag: "input", id: String(input.id), name: String(input.name), value: String(input.value), checked: !!input.checked, text: String(input.parentNode.innerText)});
+            }
+            for (var as = 0; as < selects.length; as++) {
+                var select = selects[as], choices = [];
+                for (var ao = 0; ao < select.options.length; ao++) choices.push({text: String(select.options[ao].text), value: String(select.options[ao].value)});
+                options.push({tag: "select", id: String(select.id), name: String(select.name), value: String(select.value), options: choices});
+            }
+        }
+        var existing = PrtcpList.toArray(), summary = [];
+        for (var ep = 0; ep < existing.length; ep++) summary.push({id: String(existing[ep].ID), name: String(existing[ep].name), position: String(existing[ep].positionName), role: String(existing[ep].hoxDisplayString)});
+        return {participants: summary, candidates: people, controls: options};
+    }
+    if (action === "approval_cancel") {
+        need(typeof PrtcpList !== "undefined" && PrtcpList.toArray().length === 1 && typeof closeWnd === "function", "Only an unchanged drafter-only selector can close");
+        return later(function() { closeWnd(); });
+    }
+    if (action === "approval_route") {
+        need(typeof rInfo === "object" && rInfo.appType === "sancgian", "Expected a draft approval selector");
+        need(typeof PrtcpList !== "undefined" && typeof fncAdd === "function" && typeof fncVerify === "function", "Approval form unavailable");
+        var original = PrtcpList.toArray();
+        need(original.length === 1, "Only a drafter-only line is supported; existing line preserved");
+        need(p.route && p.route.length > 0 && p.route.length <= 10, "Expected a bounded approval route");
+        var resolved = [], seen = {};
+        for (var ri = 0; ri < p.route.length; ri++) {
+            var person = p.route[ri], hits = [];
+            need(person.role === (ri === p.route.length - 1 ? "결재" : "검토"), "Route must end in one approver after reviewers");
+            for (var rf = 0; rf < frames.length; rf++) {
+                var radios = frames[rf].document.getElementsByTagName("input");
+                for (var rr = 0; rr < radios.length; rr++) {
+                    var candidate = radios[rr];
+                    if (candidate.type === "radio" && candidate.name === "partSelRadio" && String(candidate.value) === person.name && (!person.id || String(candidate.id) === person.id)) hits.push(candidate);
+                }
+            }
+            need(hits.length === 1 && hits[0].id && hits[0].id !== original[0].ID && !seen[hits[0].id], "Expected unique distinct route candidates before any add");
+            seen[hits[0].id] = true; resolved.push(hits[0]);
+        }
+        for (var ai = 0; ai < resolved.length; ai++) {
+            resolved[ai].click(); fncAdd();
+            var current = PrtcpList.toArray();
+            need(current.length === ai + 2 && current[0].ID === original[0].ID, "Unexpected approval line after add; inspect selector before resuming");
+            for (var pi = 0; pi <= ai; pi++) need(current[pi + 1].ID === resolved[pi].id, "Approval order changed; inspect selector before resuming");
+        }
+        var confirmedRoute = [];
+        for (var cr = 0; cr < resolved.length; cr++) confirmedRoute.push({name: p.route[cr].name, id: resolved[cr].id, role: p.route[cr].role});
+        return wxsAction("approval_route_confirm", {route: confirmedRoute});
+    }
+    if (action === "approval_route_confirm") {
+        need(typeof rInfo === "object" && rInfo.appType === "sancgian" && typeof PrtcpList !== "undefined" && typeof fncVerify === "function", "Expected a draft approval selector");
+        need(p.route && p.route.length > 0 && p.route.length <= 10, "Expected a bounded approval route");
+        var selectedRoute = PrtcpList.toArray();
+        need(selectedRoute.length === p.route.length + 1, "Selected route length differs; no confirmation applied");
+        for (var si = 0; si < p.route.length; si++) {
+            need(p.route[si].id && selectedRoute[si + 1].ID === p.route[si].id && selectedRoute[si + 1].name === p.route[si].name, "Selected route identity/order differs; no confirmation applied");
+            need(p.route[si].role === (si === p.route.length - 1 ? "결재" : "검토"), "Route must end in one approver after reviewers");
+            var selectRole = el("draft" + (si + 1)), exactRoles = [];
+            need(String(selectRole.parentNode.parentNode.innerText).indexOf(p.route[si].name) >= 0, "Role control does not match participant");
+            for (var oi = 0; oi < selectRole.options.length; oi++) if (String(selectRole.options[oi].text) === p.route[si].role) exactRoles.push(String(selectRole.options[oi].value));
+            need(exactRoles.length === 1, "Requested role is not a unique observed option");
+            need(String(selectRole.value) === exactRoles[0], "Native role differs from requested role; selector preserved");
+        }
+        return later(function() { fncVerify(); });
+    }
+    if (action === "disclosure_options") {
+        requireDraft();
+        var disclosure = [], all = document.getElementsByTagName("input");
+        for (var di = 0; di < all.length; di++) if (/^othbc(Lmtt|At)/.test(String(all[di].id)))
+            disclosure.push({id: String(all[di].id), type: String(all[di].type), value: String(all[di].value), checked: !!all[di].checked, text: String(all[di].parentNode.innerText)});
+        return disclosure;
+    }
     if (action === "approval_select") {
         need(typeof PrtcpList !== "undefined" && typeof fncAdd === "function" && typeof fncVerify === "function", "Approval form unavailable");
         need(PrtcpList.toArray().length === 1, "Only a drafter-only line is supported; existing line preserved");
