@@ -123,10 +123,26 @@ def inspect(docs):
             label = str(link.innerText or link.title or "").strip()
             if link.id or label:
                 links.append({"id": str(link.id), "label": label})
-        pages.append({"frame": frame, "url": safe_url(doc.url),
+        page = {"frame": frame, "url": safe_url(doc.url),
                       "title": str(doc.title), "objects": objects,
                       "inline_functions": sorted(functions),
-                      "inline_routes": sorted(routes), "links": links})
+                      "inline_routes": sorted(routes), "links": links}
+        if urlsplit(str(doc.url)).path.endswith("retrieveAbsnceCoursInfo.do"):
+            clone = call(doc.body, "cloneNode", True)
+            for tag in ("script", "style"):
+                for node in list(items(call(clone, "getElementsByTagName", tag))):
+                    call(node.parentNode, "removeChild", node)
+            page["text"] = str(clone.innerText or "")
+            page["controls"] = []
+            for element in items(call(doc, "querySelectorAll", "input,select,button")):
+                kind = str(element.type or "").lower()
+                if kind in ("hidden", "password"):
+                    continue
+                page["controls"].append({"id": str(element.id), "type": kind,
+                                         "value": str(element.value or ""),
+                                         "checked": bool(element.checked) if kind in ("radio", "checkbox") else None,
+                                         "text": str(element.innerText or "")})
+        pages.append(page)
     controls = []
     for frame, editor_id, control in editors(docs):
         row = editor_status(frame, editor_id, control)

@@ -112,7 +112,7 @@ function wxsAction(action, p) {
             if (p.kind === "open_task") {
                 if (typeof nexacro === "undefined") return false;
                 var readyForm = nexacro.getApplication().mainframe.QuickViewFrame.form;
-                return !!(readyForm.dsAList && readyForm.dsAList.rowcount > 0 && typeof readyForm.Tab00_Tabpage1_divAuth_btnAuthC01_onclick === "function");
+                return !!(readyForm.dsAList && readyForm.dsAList.rowcount >= 0 && typeof readyForm.Tab00_Tabpage1_divAuth_btnAuthC01_onclick === "function");
             }
             if (p.kind === "open_approval") return typeof PrtcpList !== "undefined" && frames.length > 1 && frames[1].document.readyState === "complete" && typeof fncVerify === "function";
             if (p.kind === "open_recipient") return typeof RecptList !== "undefined" && typeof onTabRecpChange === "function" && !!document.getElementById("orgnztNm");
@@ -182,12 +182,29 @@ function wxsAction(action, p) {
         need(typeof form.Tab00_Tabpage1_divAuth_btnAuthC01_onclick === "function", "Task confirmation handler missing");
         return later(function() { form.Tab00_Tabpage1_divAuth_btnAuthC01_onclick(); });
     }
+    if (action === "task_search") {
+        need(typeof nexacro !== "undefined", "Nexacro task form not loaded");
+        var searchForm = nexacro.getApplication().mainframe.QuickViewFrame.form;
+        var searchBox = searchForm.Tab00.Tabpage1.form.divSearch.form.edtTaskNm;
+        var searchButton = searchForm.Tab00.Tabpage1.form.divAuth.form.btnAuthS01;
+        need(typeof p.query === "string" && p.query.length > 0 && p.query.length <= 100, "Expected task search text");
+        need(searchForm.dsAList && typeof searchBox.set_value === "function" && typeof searchButton.click === "function", "Task search controls unavailable");
+        searchBox.set_value(p.query);
+        need(String(searchBox.value) === p.query, "Task search text readback mismatch");
+        return later(function() { searchButton.click(); });
+    }
     if (action === "task_options") {
         need(typeof nexacro !== "undefined", "Nexacro task form not loaded");
         var taskForm = nexacro.getApplication().mainframe.QuickViewFrame.form, taskNames = [];
         need(taskForm.dsAList, "Task dataset unavailable");
         for (var ti = 0; ti < taskForm.dsAList.rowcount; ti++) taskNames.push(String(taskForm.dsAList.getColumn(ti, "tkcrdNm")));
-        return {candidates: taskNames};
+        var taskColumns = ["tkcrdId", "tkcrdNm", "dcryPrsrvPdSeCd", "dcryPrsrvPdSeNm"], taskRows = [];
+        for (var tr = 0; tr < taskForm.dsAList.rowcount; tr++) {
+            var taskRow = {};
+            for (var tk = 0; tk < taskColumns.length; tk++) taskRow[taskColumns[tk]] = taskForm.dsAList.getColumn(tr, taskColumns[tk]);
+            taskRows.push(taskRow);
+        }
+        return {candidates: taskNames, rows: taskRows};
     }
     if (action === "open_approval") { requireDraft(); need(typeof fncReportCours === "function", "Approval handler missing"); return later(function() { fncReportCours(); }); }
     if (action === "approval_options") {

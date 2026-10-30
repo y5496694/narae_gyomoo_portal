@@ -75,7 +75,9 @@ def load_config(path):
         data["body"] = source.read_text(encoding="utf-8-sig")
     if "body" in data:
         string(data["body"], "body", empty=True)
-        data["body"] = data["body"].replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        # A trailing paragraph places the standard body's closing field marker
+        # on a new line instead of immediately after the final "끝.".
+        data["body"] = data["body"].replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n").rstrip()
     for key in ("task_card", "save_name"):
         if key in data:
             string(data[key], key)
@@ -176,6 +178,18 @@ def approval_route_matches(rows, route):
         return False
     return all(numbered[index + 2].startswith(person["role"]) and person["name"] in numbered[index + 2]
                for index, person in enumerate(route))
+
+
+def approval_route_review_matches(rows, route):
+    """Only pre-confirm parity for recalled '-' rows; native full IDs/roles
+    must still match in approval_route_confirm, then numbered readback is mandatory."""
+    if approval_route_matches(rows, route):
+        return True
+    if len(rows) != len(route) + 1 or any(not re.match(r"^\s*-", row) for row in rows):
+        return False
+    cleaned = [row.strip()[1:].lstrip() for row in rows]
+    return (sum(row.startswith("기안") for row in cleaned) == 1 and
+            all(sum(row.startswith(person["role"]) and person["name"] in row for row in cleaned) == 1 for person in route))
 
 
 def replacement_dialog(text, name):

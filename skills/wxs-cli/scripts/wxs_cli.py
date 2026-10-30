@@ -7,13 +7,30 @@ from pathlib import Path
 import platform
 import sys
 
-from wxs_config import PACK_ID, VERSION, load_config, plan, string, approval_route_matches
+from wxs_config import PACK_ID, VERSION, load_config, plan, string, approval_route_matches, approval_route_review_matches
 
 
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument("--version", action="version", version=VERSION)
     commands = root.add_subparsers(dest="command", required=True)
+    notices = commands.add_parser("native-notices", help="Read native web messages in the selected WXS process without accepting them")
+    notices.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    notices.add_argument("--out", type=Path)
+    read_notice = commands.add_parser("read-notice", help="Preview or acknowledge the exact content-change notice on an unchanged read-only document")
+    read_notice.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    read_notice.add_argument("--expected-title", required=True)
+    read_notice.add_argument("--expected-message", required=True)
+    read_notice.add_argument("--expected-fingerprint")
+    read_notice.add_argument("--apply", action="store_true")
+    read_notice.add_argument("--out", type=Path)
+    absence = commands.add_parser("absence-route", help="Preview or preserve a named absent approver for processing after return")
+    absence.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    absence.add_argument("--expected-person", required=True)
+    absence.add_argument("--expected-position", required=True)
+    absence.add_argument("--expected-fingerprint")
+    absence.add_argument("--apply", action="store_true")
+    absence.add_argument("--out", type=Path)
     resume = commands.add_parser("final-resume", help="Resume the same receipt once after a proven native route-review rejection")
     resume.add_argument("--receipt", type=Path, required=True)
     resume.add_argument("--expected-fingerprint")
@@ -63,9 +80,18 @@ def parser():
     options.add_argument("--dialog-hwnd", type=lambda value: int(value, 0), help="Observe the already open approval dialog from a previous result")
     options.add_argument("--close", action="store_true", help="Close only the observed unchanged drafter-only approval selector")
     options.add_argument("--task-card", help="Select this exact candidate in the observed open task dialog, with --apply")
+    options.add_argument("--task-query", help="Search task-card names through the observed open task dialog; does not select or confirm")
     options.add_argument("--confirm-route", type=Path, help="Confirm only an already selected route matching this draft config; never add people")
     options.add_argument("--apply", action="store_true")
     options.add_argument("--out", type=Path)
+    notice = commands.add_parser("route-notice", help="Preview or acknowledge one exact informational absence notice without changing the route")
+    notice.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    notice.add_argument("--expected-title", required=True)
+    notice.add_argument("--expected-person", required=True)
+    notice.add_argument("--expected-message", required=True)
+    notice.add_argument("--expected-fingerprint")
+    notice.add_argument("--apply", action="store_true")
+    notice.add_argument("--out", type=Path)
     for name in ("inspect", "text", "attachments", "attachment-status", "export-attachments", "draft-status", "draft", "save-draft"):
         command = commands.add_parser(name)
         command.add_argument("--hwnd", type=lambda value: int(value, 0),
@@ -141,6 +167,10 @@ def run(args):
         route_apply = args.section == "approval" and args.confirm_route and not args.task_card
         if not (task_apply or route_apply) or not args.apply or not args.dialog_hwnd or args.close:
             raise ValueError("Selection requires the matching section, observed --dialog-hwnd, one task-card/confirm-route and --apply")
+    if args.command == "draft-options" and args.task_query is not None:
+        string(args.task_query, "task_query")
+        if args.section != "task" or not args.dialog_hwnd or args.apply or args.task_card or args.confirm_route or args.close:
+            raise ValueError("Task search requires only --section task and an observed --dialog-hwnd")
     config = load_config(args.config) if args.command == "draft" else None
     if args.command == "save-draft":
         string(args.name, "name")
@@ -193,6 +223,26 @@ def run(args):
             from wxs_final import confirm
             return confirm(args.receipt, args.expected_message, args.confirm_final_action, wxs_runtime, args.expected_fingerprint)
         window = native.select_window(args)
+        if args.command == "native-notices":
+            import wxs_runtime
+            from wxs_route_notice import inspect_notices
+            return inspect_notices(window, wxs_runtime)
+        if args.command == "read-notice":
+            import wxs_runtime
+            from wxs_route_notice import read_notice
+            return read_notice(wxs_runtime.Session(window), args.expected_title, args.expected_message,
+                               wxs_runtime, args.expected_fingerprint, args.apply)
+        if args.command == "absence-route":
+            from wxs_absence import run as absence_run
+            return absence_run(window, args.expected_person, args.expected_position,
+                               args.apply, args.expected_fingerprint, native)
+        if args.command == "route-notice":
+            import wxs_runtime
+            from wxs_route_notice import prepare, acknowledge
+            session = wxs_runtime.Session(window)
+            if args.apply:
+                return acknowledge(session, args.expected_title, args.expected_person, args.expected_message, args.expected_fingerprint, wxs_runtime)
+            return prepare(session, args.expected_title, args.expected_person, args.expected_message, wxs_runtime)
         if args.command == "draft-options":
             from wxs_runtime import Session
             session = Session(window)
@@ -214,6 +264,10 @@ def run(args):
                 if args.section == "task":
                     if args.close:
                         raise ValueError("Closing task selectors is unsupported")
+                    if args.task_query is not None:
+                        session.action("task_search", {"query": args.task_query}, root)
+                        return {"window": matches[0], "search_requested": args.task_query, "selected": False,
+                                "next": "Read the same task dialog again to inspect the refreshed candidates"}
                     if args.apply:
                         session.action("task_select", {"name": args.task_card}, root)
                         session.wait_closed(matches[0])
@@ -226,7 +280,7 @@ def run(args):
                     config = load_config(args.confirm_route)
                     if set(config) - {"expected_title", "title", "approval_route", "attachments"} or config["attachments"] or "approval_route" not in config or config["expected_title"] != args.expected_title or config["title"] != args.expected_title:
                         raise ValueError("Route confirmation requires the same document and a route-only config")
-                    if len(status["approval_rows"]) != 1 and not approval_route_matches(status["approval_rows"], config["approval_route"]):
+                    if len(status["approval_rows"]) != 1 and not approval_route_review_matches(status["approval_rows"], config["approval_route"]):
                         raise ValueError("Existing approval route differs; no replacement or confirmation applied")
                     session.action("approval_route_confirm", {"route": config["approval_route"]}, root)
                     session.wait_closed(matches[0])

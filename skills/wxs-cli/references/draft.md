@@ -1,5 +1,7 @@
 # 초안 설정
 
+본문 서식은 [작성·붙임·줄 정렬](draft-writing.md), 과제 검색과 부재 안내·회수 결재선은 [선택창 복구](recalled-drafts.md)를 함께 적용한다.
+
 UTF-8 JSON을 사용한다. 상대 경로는 설정 파일 폴더 기준이며 BOM도 허용한다.
 
 ```json
@@ -21,7 +23,7 @@ UTF-8 JSON을 사용한다. 상대 경로는 설정 파일 폴더 기준이며 B
 | --- | --- |
 | expected_title | 변경 전 현재 제목. 새 양식이면 빈 문자열. 필수 |
 | title | 입력할 제목. 필수 |
-| body / body_file | 본문 문자열 또는 UTF-8 텍스트 파일, 둘 중 하나. CRLF로 줄바꿈 변환 |
+| body / body_file | 본문 문자열 또는 UTF-8 텍스트 파일, 둘 중 하나. CRLF 변환 후 맨 뒤 공백·줄바꿈 제거. 내부 문단과 앞 공백은 보존 |
 | body_hwp | 표·서식이 포함된 본문용 HWP. `{"path":"본문.hwp","expected_text":"전체 본문과 표 셀 원문"}`. body/body_file과 함께 사용 불가 |
 | task_card | 실제 후보의 정확한 과제카드 명칭 |
 | private_reasons | 비공개 선택과 사유 1~8호. `[6]`이면 6호만 선택 |

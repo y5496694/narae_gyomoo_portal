@@ -8,7 +8,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from wxs_config import load_config, plan, replacement_dialog, approval_route_matches
+from wxs_config import load_config, plan, replacement_dialog, approval_route_matches, approval_route_review_matches
 
 
 class ConfigTests(unittest.TestCase):
@@ -69,6 +69,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(self.load(body_file='본문.txt')['body'], '한글\r\n본문')
         with self.assertRaises(ValueError): self.load(body_file='본문.txt', body='x')
 
+    def test_body_ends_at_final_text_preserving_internal_layout(self):
+        expected = '1. 관련: 합성 근거\r\n2. 합성 내용\r\n  가. 세부 내용\r\n\r\n붙임  합성 문서 1부.  끝.'
+        self.assertEqual(self.load(body=expected + '  \t\r\n\r\n')['body'], expected)
+        (self.root / '본문.txt').write_bytes((expected + '\r\n').encode('utf-8'))
+        self.assertEqual(self.load(body_file='본문.txt')['body'], expected)
+
     def test_formatted_body_fingerprint_and_exclusivity(self):
         source = self.root / 'body.hwp'
         source.write_bytes(bytes.fromhex('d0cf11e0a1b11ae1') + b'fake-document')
@@ -111,6 +117,20 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(approval_route_matches(list(reversed(rows)), route))
         for invalid in ([rows[0], rows[1], rows[1]], [rows[0], rows[1], '3검토교장가상 교장 대기'], [rows[0], '3검토부장가상 부장 대기', '2결재교장가상 교장 대기']):
             self.assertFalse(approval_route_matches(invalid, route))
+
+    def test_recalled_dash_rows_only_allow_preconfirmation_parity(self):
+        route = [{'name': '가상 부장', 'role': '검토'}, {'name': '가상 교장', 'role': '결재'}]
+        rows = ['-기안교사기안자 대기', '-검토부장가상 부장 대기', '-결재교장가상 교장 대기']
+        self.assertTrue(approval_route_review_matches(rows, route))
+        self.assertTrue(approval_route_review_matches(list(reversed(rows)), route))
+        self.assertFalse(approval_route_matches(rows, route))
+        for invalid in (rows[:2], rows + [rows[0]],
+                        [rows[0], rows[1], rows[1]],
+                        [rows[0], rows[1], '-검토교장가상 교장 대기'],
+                        [rows[0], rows[1], '-결재교장다른 사람 대기'],
+                        ['1기안교사기안자 대기', *rows[1:]]):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(approval_route_review_matches(invalid, route))
 
     def test_exact_replacement_prompt(self):
         message = "임시보관함에 이미 '가상 초안' 문서가 있습니다.\n기존 문서를 이 문서로 바꾸시겠습니까?"

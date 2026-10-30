@@ -57,6 +57,26 @@ test('task selection uses exact dataset name, not a hardcoded ID', () => {
   assert.throws(()=>c.wxsAction('task_select',{name:'과제'}),/exact unique/);
   names[0]='가상 과제'; assert.throws(()=>c.wxsAction('task_select',{name:'가상 과제'}),/exact unique/);
 });
+test('task lookup includes retention without exposing unrelated dataset columns', () => {
+  const rows=[{tkcrdId:'mock-task',tkcrdNm:'가상 개별화교육',dcryPrsrvPdSeCd:'30',dcryPrsrvPdSeNm:'30년',unrelated:'private'}];
+  const form={dsAList:{rowcount:1,getColumn(i,key){return rows[i][key];}},Tab00_Tabpage1_divAuth_btnAuthC01_onclick(){}};
+  const c=ctx({nexacro:{getApplication(){return {mainframe:{QuickViewFrame:{form}}};}}});
+  assert.deepEqual(JSON.parse(JSON.stringify(c.wxsAction('task_options',{}))),{candidates:['가상 개별화교육'],rows:[{tkcrdId:'mock-task',tkcrdNm:'가상 개별화교육',dcryPrsrvPdSeCd:'30',dcryPrsrvPdSeNm:'30년'}]});
+  form.dsAList.rowcount=0;
+  assert.equal(c.wxsAction('ready',{kind:'open_task'}),true);
+  assert.equal(c.wxsAction('task_options',{}).rows.length,0);
+});
+
+test('task search uses the UI search control and never selects or confirms', () => {
+  let clicked=0,confirmed=0;
+  const input={value:'',set_value(value){this.value=value;}};
+  const form={dsAList:{rowcount:0},Tab00:{Tabpage1:{form:{divSearch:{form:{edtTaskNm:input}},divAuth:{form:{btnAuthS01:{click(){clicked++;}}}}}}},Tab00_Tabpage1_divAuth_btnAuthC01_onclick(){confirmed++;}};
+  const c=ctx({nexacro:{getApplication(){return {mainframe:{QuickViewFrame:{form}}};}}});
+  assert.throws(()=>c.wxsAction('task_search',{query:''}),/search text/);
+  c.wxsAction('task_search',{query:'개별화'});assert.equal(input.value,'개별화');assert.equal(clicked,0);
+  c.flush();assert.equal(clicked,1);assert.equal(confirmed,0);
+});
+
 test('same-name approvers stop until an exact ID is supplied', () => {
   let clicked=0, participants=1, verified=0;
   const radio = id => ({type:'radio',name:'partSelRadio',value:'가상교사',id,parentNode:{parentNode:{innerText:'가상부서 교사'}} ,click(){clicked++;}});
