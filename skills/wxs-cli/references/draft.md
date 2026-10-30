@@ -57,7 +57,7 @@ python $wxsCli save-draft --name '테스트' --expected-title '테스트' --hwnd
 
 ## 표가 포함된 본문과 캡처 (0.4.0)
 
-본문용 HWP는 나래 한글 오피스 CLI로 만들고 읽어 검토한다. 제목은 WXS의 title에 넣고 본문용 파일에는 안내 문장·표 등 본문 내용만 넣는다. body_hwp는 32 MiB 이하의 바이너리 HWP만 지원하며 HWPX 파일을 직접 넣지 않는다. 파일 해시와 빈 본문을 사전 확인한 뒤 표준 본문 필드로 이동해 HwpCtrl.SetTextFile(HWP, insertfile)로 끼운다. 기존 본문 교체는 지원하지 않는다.
+본문용 HWP는 나래 한글 오피스 CLI로 만들고 읽어 검토한다. 제목은 WXS의 title에 넣고 본문용 파일에는 안내 문장·표 등 본문 내용만 넣는다. body_hwp는 32 MiB 이하의 바이너리 HWP만 지원하며 HWPX 파일을 직접 넣지 않는다. 파일 해시와 빈 본문을 사전 확인한 뒤 표준 본문 필드로 이동해 HwpCtrl.SetTextFile(HWP, insertfile)로 끼운다. 이 끼우기 명령으로 기존 본문을 교체하지 않는다.
 
 expected_text에는 안내 문장과 표의 모든 셀 원문을 행 순서대로 넣는다. 표 셀의 텍스트는 GetFieldText에 포함되지 않을 수 있으므로 전체 GetTextFile(TEXT)에서 삽입한 원문을 제외했을 때 이전 문서 전체와 같은지 확인한다. 공백·문단·셀 구분의 차이만 무시하며, 표준 필드 목록과 다른 필드의 값도 보존되어야 한다. 글꼴·테두리·배치의 정확성은 캡처로 별도 검수한다. 중간 실패 시 기존 내용에 반복 삽입하지 않는다. text와 capture로 실제 내용을 먼저 확인한다.
 
@@ -68,3 +68,18 @@ python $wxsCli capture --hwnd 123456 --expected-title '현재 제목' --director
 ```
 
 새 폴더만 허용하며 96~300 DPI, 최대 50쪽을 지원한다. CreatePageImage로 받은 BMP를 PNG로 저장하고 크기·SHA-256을 반환한다. 전후 제목·전체 문서 텍스트·본문 필드·수정 상태·쪽 수·결재경로·첨부가 같아야 verified:true다. 서버 저장 여부는 별도의 save-draft 성공 증거로 판단하며 캡처 자체는 저장이나 상신을 하지 않는다.
+
+## 실제 글꼴 비교와 전체 기안 사본 적용
+
+`insertfile`은 기존 양식의 스타일과 합쳐져 본문 파일과 다른 글꼴이 될 수 있다. 실제 문서를 `export-document`로 새 HWP 경로에 내보낸 뒤 나래 한글 오피스의 inspect로 글꼴·크기·문단·표를 읽는다. 전체 문서 텍스트와 메타데이터가 같은 경우에만 내보내기로 바뀐 편집 모드·수정 표시를 원래대로 복원한다. 이 명령은 열린 문서를 저장하거나 덮어쓰지 않는다. 초기 내보내기가 플래그 변경으로 실패했다면 `--restore-readonly-from`은 같은 제목·전체 TEXT 원문이 일치하는 읽기 전용 사본에 한해 복구한다.
+
+편집할 때는 **현재 열린 편집 가능 기안의 전체 사본**을 먼저 내보내고 나래 한글 오피스로 필요한 본문 문단만 수정한다. 다른 문서나 참고 기안의 전체 파일로 대체하지 않는다. 실제 회수는 나래교무 브라우저의 문서진행에서 선택한 한 건의 제목·문서 ID와 확인창을 대조하고, 회수 상태를 다시 조회한 뒤 편집 기안을 연다.
+
+```powershell
+python $wxsCli export-document --hwnd 123456 --expected-title '현재 제목' --path 'D:\Codex\work\기안원본.hwp'
+# 나래 한글 오피스로 사본 inspect → 본문 편집 → 수정 사본 inspect
+python $wxsCli replace-document --hwnd 123456 --expected-title '현재 제목' --source 'D:\Codex\work\기안수정.hwp' --expected-text-file 'D:\Codex\work\수정전체원문.txt' --out 'D:\Codex\work\교체미리보기.json'
+# 같은 인자에 --apply --expected-fingerprint '방금 검토한 지문'을 추가하여 적용
+```
+
+수정전체원문은 나래 한글 오피스로 읽은 제목·전체 본문·모든 표 셀·하단 필드를 순서대로 포함한다. 교체는 32 MiB 이하 HWP와 편집 가능·미처리 표준 기안에만 허용된다. 전체 HWP를 불러와 스타일 합치기를 피하며 표준 필드 목록, 본문 외 모든 필드, 결재선·과제카드·공개 설정·수신·첨부와 전체 원문을 대조한다. 실패 시 부분 변경 가능성을 보고하며 자동 재시도나 롤백을 하지 않는다. 성공 후 실제 WXS를 다시 내보내 나래 한글 오피스로 글꼴을 확인하고 capture로 배치를 검수한다. 임시저장·상신과 서버 완료 확인은 별도 절차다.

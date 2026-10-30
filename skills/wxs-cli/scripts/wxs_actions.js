@@ -10,6 +10,18 @@ function wxsAction(action, p) {
         need(typeof rInfo === "object" && rInfo.appType === "sancgian" && !rInfo.docProcessed,
              "Expected an unprocessed sancgian draft");
     }
+    if (action === "restore_export_readonly") {
+        need(typeof rInfo === "object" && rInfo.appType === "sancview", "Only a read-only document copy may restore export flags");
+        need(typeof IMPL_SetDocumentUpdated === "function", "Observed clean-state helper unavailable");
+        IMPL_SetDocumentUpdated("editor1", false);
+        return {restored: true};
+    }
+    if (action === "set_draft_updated") {
+        requireDraft();
+        need(typeof p.modified === "boolean" && typeof IMPL_SetDocumentUpdated === "function", "Observed draft update helper unavailable");
+        IMPL_SetDocumentUpdated("editor1", p.modified);
+        return {updated: true};
+    }
     if (action === "processing_status" || action === "processing_click" || action === "processing_preflight") {
         need(/\/retrieveDocSanctn\.do$/.test(String(location.pathname)), "Expected the observed document-processing route");
         var fields = [], processingInputs = document.querySelectorAll("input,select,textarea"), submit = el("aSubmit");

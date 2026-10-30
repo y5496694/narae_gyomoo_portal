@@ -36,6 +36,20 @@ def parser():
     capture.add_argument("--directory", type=Path, required=True)
     capture.add_argument("--dpi", type=int, default=150)
     capture.add_argument("--out", type=Path)
+    export = commands.add_parser("export-document", help="Export a verified HWP comparison copy without changing the open document")
+    export.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    export.add_argument("--expected-title", required=True)
+    export.add_argument("--path", type=Path, required=True)
+    export.add_argument("--out", type=Path)
+    export.add_argument("--restore-readonly-from", type=Path, help="Recover only export flags after matching the earlier full TEXT extraction")
+    replace = commands.add_parser("replace-document", help="Preview or apply a Narae-edited full draft copy while preserving standard fields and metadata")
+    replace.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    replace.add_argument("--expected-title", required=True)
+    replace.add_argument("--source", type=Path, required=True)
+    replace.add_argument("--expected-text-file", type=Path, required=True)
+    replace.add_argument("--expected-fingerprint")
+    replace.add_argument("--apply", action="store_true")
+    replace.add_argument("--out", type=Path)
     options = commands.add_parser("draft-options", help="Observe draft disclosure controls or open the approval selector without selecting people")
     options.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
     options.add_argument("--expected-title", required=True)
@@ -234,6 +248,16 @@ def run(args):
             from wxs_document import capture_pages
             from wxs_runtime import Session
             return capture_pages(Session(window), args.expected_title, args.directory, args.dpi)
+        if args.command == "export-document":
+            from wxs_document import export_document
+            from wxs_runtime import Session
+            return export_document(Session(window), args.expected_title, args.path, args.restore_readonly_from)
+        if args.command == "replace-document":
+            from wxs_runtime import Session
+            from wxs_document import replacement_preview, replace_document
+            session = Session(window)
+            preview = replacement_preview(session, args.expected_title, args.source, args.expected_text_file)
+            return replace_document(session, preview, args.expected_fingerprint) if args.apply else preview
         if args.command == "export-attachments":
             from wxs_read import export_attachments
             return export_attachments(window, args.expected_title, args.directory, native)
