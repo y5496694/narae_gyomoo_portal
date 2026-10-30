@@ -23,6 +23,7 @@ def parser():
         read.add_argument("--out", type=Path, required=True, help="New JSON body/attachment result file")
         read.add_argument("--timeout", type=int, default=90)
         read.add_argument("--background", action="store_true", help="Hide the matched window while reading; initial activation can still occur")
+        read.add_argument("--cancel-file", type=Path, help="Stop waiting when this local marker exists; preserve the current document")
         read.add_argument("--attachments-dir", type=Path, help="New directory for every attachment, exported through the current app handler")
         if name == "read-open":
             read.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)

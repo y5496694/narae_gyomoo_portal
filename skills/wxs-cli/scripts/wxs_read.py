@@ -119,6 +119,16 @@ def read_next(args, native):
     window, hidden, last_error = None, False, "No matching new window"
     try:
         while time.monotonic() < deadline:
+            cancel_file = getattr(args, "cancel_file", None)
+            if cancel_file and cancel_file.exists():
+                result = {"status": "cancelled", "expected_title": args.expected_title,
+                          "closed": False, "preserved": True,
+                          "body": {"text": "", "body_read": False},
+                          "attachments": {"files": [], "all_exported": False}}
+                with args.out.open("x", encoding="utf-8") as target:
+                    json.dump(result, target, ensure_ascii=False, indent=2)
+                return {"status": "cancelled", "output": str(args.out.resolve()),
+                        "closed": False, "preserved": True}
             current = native.windows(include_hidden=True)
             selected_pids = {w["pid"] for w in current if w["hwnd"] not in baseline
                              and title_matches(w["title"], args.expected_title)}

@@ -14,6 +14,24 @@ import wxs_read
 
 
 class ReadTests(unittest.TestCase):
+    def test_cancelling_a_prepared_reader_never_claims_or_closes_a_window(self):
+        with tempfile.TemporaryDirectory() as temp:
+            marker, output = Path(temp)/'cancel', Path(temp)/'result.json'
+            def baseline(**_kwargs):
+                marker.write_text('cancel', encoding='utf-8')
+                return []
+            native = SimpleNamespace(windows=Mock(side_effect=baseline))
+            args = SimpleNamespace(timeout=5, expected_title='합성 공문', background=True,
+                                   cancel_file=marker, out=output)
+            with patch('wxs_read.win32gui.ShowWindow') as show, patch('wxs_read.win32gui.PostMessage') as close:
+                result = wxs_read.read_next(args, native)
+                self.assertEqual(result['status'], 'cancelled')
+                self.assertEqual(native.windows.call_count, 1)
+                show.assert_not_called(); close.assert_not_called()
+            saved = json.loads(output.read_text(encoding='utf-8'))
+            self.assertFalse(saved['body']['body_read'])
+            self.assertTrue(saved['preserved']); self.assertFalse(saved['closed'])
+
     def test_title_matching_only_collapses_rendered_whitespace(self):
         self.assertTrue(wxs_read.title_matches('[안내]  예시\n문서', '[안내] 예시 문서'))
         self.assertFalse(wxs_read.title_matches('[수정] 예시 문서', '[안내] 예시 문서'))
