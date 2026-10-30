@@ -10,6 +10,7 @@ from pathlib import Path
 LABELS = {"submit": ("상신", "결재올림"), "approve": ("결재", "결재승인", "승인")}
 INTERNAL_CONFIRM = "수신자를 지정하지 않으면 내부결재로 처리됩니다. 계속하시겠습니까?"
 COMPLETION_NOTICE = "정상적으로 처리되었습니다.\n결재완료후 결재완료한 문서가 그대로 보이는 경우, 목록 새로고침을 하시기 바랍니다."
+ROUTE_REVIEW = "결재경로를 확인해 주시기 바랍니다."
 
 
 def fingerprint(value):
@@ -91,6 +92,8 @@ def inspect_dialog(receipt_path, native_runtime):
     message = native_runtime.alert_details(candidates[0])[0] if candidates else None
     result = {"present": bool(candidates), "message": message, "completed": False,
               "verification_required": True, "untrusted": True}
+    if message == ROUTE_REVIEW and receipt["operation"] == "submit":
+        result["route_review"] = native_runtime.Session(receipt["window"]).action("route_review_status")
     if message == INTERNAL_CONFIRM and receipt["operation"] == "submit":
         session = native_runtime.Session(receipt["window"])
         labels = [b["label"] for b in session.action("final_buttons") if b["label"] in LABELS["submit"] and not b["disabled"]]
@@ -186,6 +189,17 @@ def confirm(receipt_path, expected_message, authorized, native_runtime, expected
     message, children = native_runtime.alert_details(window)
     if message != expected_message:
         raise ValueError("Site message changed; no confirmation applied")
+    if message == ROUTE_REVIEW and receipt["operation"] == "submit":
+        session = native_runtime.Session(receipt["window"])
+        state, proof = session.status(), session.action("route_review_status")
+        if state.get("title") != receipt["expected_title"] or state.get("processed") is not False or session.frame_errors or proof != {"reviewed": False, "message": ROUTE_REVIEW, "guard": True, "processing_gate": True}:
+            raise ValueError("Route validation does not prove rejection before document processing")
+        with path.with_suffix(path.suffix + ".route-review-requested").open("x", encoding="utf-8") as stream:
+            json.dump({"document": state, "proof": proof}, stream, ensure_ascii=False)
+        receipt.update(status="route_review_required", route_validation_document=state, route_validation_proof=proof)
+        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+        native_runtime.press_dialog_button(window, children, "확인")
+        return dict(receipt, completed=False, evidence="Native validation returned before processing; confirm the existing route before final-resume")
     if message == INTERNAL_CONFIRM and receipt["operation"] == "submit":
         if receipt.get("internal_confirmation_attempted"):
             raise ValueError("Internal approval confirmation already attempted")
@@ -222,6 +236,41 @@ def confirm(receipt_path, expected_message, authorized, native_runtime, expected
     native_runtime.press_dialog_button(window, children, "확인")
     return dict(receipt, completed=False, status="verification_required",
                 evidence="Exact native confirmation accepted; verify server document status separately")
+
+
+def resume_route_review(receipt_path, expected_fingerprint, authorized, native_runtime, apply=False):
+    path = Path(receipt_path)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    if receipt.get("status") != "route_review_required" or receipt.get("operation") != "submit" or any(receipt.get(k) for k in ("confirmation_attempted", "processing_attempted", "internal_confirmation_attempted")):
+        raise ValueError("Only a proven route-validation rejection may resume")
+    session = native_runtime.Session(receipt["window"])
+    proof = session.action("route_review_status")
+    if proof != {"reviewed": True, "message": ROUTE_REVIEW, "guard": True, "processing_gate": True}:
+        raise ValueError("Existing approval route has not been confirmed")
+    labels = [b["label"] for b in session.action("final_buttons") if b["label"] in LABELS["submit"] and not b["disabled"]]
+    if len(labels) != 1:
+        raise ValueError("Expected one observed submit control")
+    preview = prepare(session, "submit", receipt["expected_title"], labels[0])
+    old, current = receipt["route_validation_document"], preview["binding"]["document"]
+    if any(value != current.get(key) for key, value in old.items() if key not in {"approval_rows", "is_modified", "document_text"}):
+        raise ValueError("Document changed outside the approval-route confirmation")
+    if old["document_text"] != current["document_text"]:
+        from wxs_document import normalize_export_text
+        drafter = session.action("route_review_drafter")
+        before_text, after_text = normalize_export_text(old["document_text"]), normalize_export_text(current["document_text"])
+        marker = "\n" + drafter + "\n"
+        if before_text.count(marker) != 1 or before_text.replace(marker, "\n\n", 1) != after_text or native_runtime.native.call(session.editor(), "GetFieldText", "서명.1") != "":
+            raise ValueError("Document changed outside the native drafter-signature reset")
+    if not apply:
+        return preview
+    if authorized is not True or expected_fingerprint != preview["fingerprint"]:
+        raise ValueError("Resume requires explicit authorization and a reviewed fingerprint")
+    with path.with_suffix(path.suffix + ".route-review-resumed").open("x", encoding="utf-8") as stream:
+        stream.write(expected_fingerprint)
+    receipt.update(status="verification_required", route_review_original_fingerprint=receipt["fingerprint"], fingerprint=expected_fingerprint, route_review_resumed=True)
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+    session.action("final_click", {"button": preview["binding"]["button"], "expected_title": receipt["expected_title"], "operation": "submit"})
+    return dict(receipt, completed=False, evidence="Resumed once after the original route-validation rejection; verify subsequent dialogs")
 
 
 def acknowledge(receipt_path, expected_message, native_runtime):

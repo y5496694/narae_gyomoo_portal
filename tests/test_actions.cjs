@@ -35,6 +35,20 @@ test('readonly document cannot open write dialogs', () => {
   const c=ctx({rInfo:{appType:'sanckyul',docProcessed:false},fncReportCours(){throw Error('must not call');}});
   assert.throws(()=>c.wxsAction('open_approval',{}),/unprocessed sancgian/);
 });
+test('current numbered approval rows exclude recall history in the same table',()=>{
+  const rows=[{innerText:'결재경로표-'},{innerText:'2결재가상 교장대기'},{innerText:'1기안가상 교사대기'},{innerText:'-결재가상 교장-'},{innerText:'-기안가상 교사회수'}];
+  const c=ctx({rInfo:{appType:'sancgian',docProcessed:false},document:{getElementById(){return null;},getElementsByTagName(tag){return tag==='table'?[{innerText:'결재경로표-',rows}]:[];}}});
+  assert.deepEqual(Array.from(c.wxsAction('status',{}).approval_rows),['2결재가상 교장대기','1기안가상 교사대기']);
+});
+test('route review proof requires the original native guard and processing gate',()=>{
+ const c=ctx({rInfo:{appType:'sancgian',docProcessed:false},pInfo:{appr_inited:false},lang_chkApprLine:'합성 경로 안내',
+   Validator:{validate:function(){if(!pInfo.appr_inited){alert(lang_chkApprLine);showApprProperty();throw $break;}}},
+   fncValidate:function(){try{Validator.validate(domHox1);}catch(e){return false;}},
+   fncSanctn:function(){var valiResult = fncValidate();if(valiResult){showDocSanctnProc();}}});
+ let proof=c.wxsAction('route_review_status',{});assert.equal(proof.reviewed,false);assert.equal(proof.guard,true);assert.equal(proof.processing_gate,true);
+ c.pInfo.appr_inited=true;assert.equal(c.wxsAction('route_review_status',{}).reviewed,true);
+ c.Validator.validate=function(){};assert.equal(c.wxsAction('route_review_status',{}).guard,false);
+});
 test('task selection uses exact dataset name, not a hardcoded ID', () => {
   let selected=-1, confirmed=0; const names=['다른 과제','가상 과제'];
   const form={dsAList:{rowcount:2,getColumn(i){return names[i];}},fnSelectUnitTkcrd(i){selected=i;},Tab00_Tabpage1_divAuth_btnAuthC01_onclick(){confirmed++;}};

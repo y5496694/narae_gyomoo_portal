@@ -14,6 +14,12 @@ def parser():
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument("--version", action="version", version=VERSION)
     commands = root.add_subparsers(dest="command", required=True)
+    resume = commands.add_parser("final-resume", help="Resume the same receipt once after a proven native route-review rejection")
+    resume.add_argument("--receipt", type=Path, required=True)
+    resume.add_argument("--expected-fingerprint")
+    resume.add_argument("--apply", action="store_true")
+    resume.add_argument("--confirm-final-action", action="store_true")
+    resume.add_argument("--out", type=Path)
     commands.add_parser("doctor", help="Report prerequisites without opening/logging in to applications")
     windows = commands.add_parser("windows", help="List open WXS windows")
     windows.add_argument("--include-hidden", action="store_true", help="Include windows hidden for background reading")
@@ -126,6 +132,8 @@ def run(args):
         raise ValueError("Native final confirmation requires --confirm-final-action")
     if args.command == "final-process" and args.apply and (not args.confirm_final_action or not args.expected_fingerprint):
         raise ValueError("Processing confirmation requires --confirm-final-action and --expected-fingerprint")
+    if args.command == "final-resume" and args.apply and (not args.confirm_final_action or not args.expected_fingerprint):
+        raise ValueError("Route-review resume requires --confirm-final-action and --expected-fingerprint")
     if args.command == "final-process" and args.audit_rejection and args.apply:
         raise ValueError("Rejection audit cannot click or be combined with --apply")
     if args.command == "draft-options" and (args.task_card or args.confirm_route or args.apply):
@@ -163,6 +171,10 @@ def run(args):
             import wxs_runtime
             from wxs_final import inspect_dialog
             return inspect_dialog(args.receipt, wxs_runtime)
+        if args.command == "final-resume":
+            import wxs_runtime
+            from wxs_final import resume_route_review
+            return resume_route_review(args.receipt, args.expected_fingerprint, args.confirm_final_action, wxs_runtime, args.apply)
         if args.command == "final-process":
             import wxs_runtime
             from wxs_final import processing_preview, process, audit_processing_rejection
@@ -212,8 +224,10 @@ def run(args):
                     return {"window": matches[0], "options": session.action("task_options", root=root)}
                 if args.confirm_route:
                     config = load_config(args.confirm_route)
-                    if set(config) - {"expected_title", "title", "approval_route", "attachments"} or config["attachments"] or "approval_route" not in config or config["expected_title"] != args.expected_title or config["title"] != args.expected_title or len(status["approval_rows"]) != 1:
-                        raise ValueError("Route confirmation requires the same drafter-only document and a route-only config")
+                    if set(config) - {"expected_title", "title", "approval_route", "attachments"} or config["attachments"] or "approval_route" not in config or config["expected_title"] != args.expected_title or config["title"] != args.expected_title:
+                        raise ValueError("Route confirmation requires the same document and a route-only config")
+                    if len(status["approval_rows"]) != 1 and not approval_route_matches(status["approval_rows"], config["approval_route"]):
+                        raise ValueError("Existing approval route differs; no replacement or confirmation applied")
                     session.action("approval_route_confirm", {"route": config["approval_route"]}, root)
                     session.wait_closed(matches[0])
                     after = session.status()

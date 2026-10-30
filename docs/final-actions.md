@@ -40,6 +40,10 @@ python $wxsCli final-confirm --receipt $receipt --expected-message '상신하시
 
 내부결재 안내가 뜨면 같은 receipt로 `final-dialog --out 새JSON`을 실행한다. 편집기가 결재올림 직전에 표어·주소·연락처를 자동 반영할 수 있으므로 반환된 `document_preview`의 전체 본문·결재선·첨부·공개 구분을 이전 미리보기와 대조한다. 검토한 새 fingerprint를 `final-confirm --expected-fingerprint 값`에 전달해야 변경된 준비 상태를 수락할 수 있다. 이 옵션은 해당 내부결재 안내에만 적용되며 원래 상신 시도와 새 확인 지문을 모두 보존한다.
 
+회수·재작성 후 정확히 **“결재경로를 확인해 주시기 바랍니다.”** 안내가 나오면 `final-dialog`의 `route_review`를 확인한다. `guard:true`, `processing_gate:true`, `reviewed:false`는 현재 앱의 결재선 확인 분기가 문서처리 전에 중단함을 검증한 결과다. 같은 receipt로 이 실제 문구의 `final-confirm`을 실행하면 안내만 닫고 앱이 여는 기존 결재선 선택창을 보존한다. 현재 결재선의 사람·순서·역할을 대조한 route-only 설정과 `draft-options --confirm-route ... --dialog-hwnd ... --apply`로 기존 경로를 확인한다. 사람을 다시 추가하거나 경로를 교체하지 않는다. 현재 순번 행과 회수 전 이력 행은 구분한다.
+
+`final-resume --receipt 기존기록 --out 새미리보기`로 새 지문을 검토한 뒤 같은 명령에 `--apply --confirm-final-action --expected-fingerprint 값`을 추가한다. 이 기능은 위의 네이티브 사전검사 거절이 입증된 동일 기록만 1회 재개하며 원래 시도 잠금을 유지한다. 본문·제목·공개 구분·첨부 변경은 거절한다. 결재선 확인 때 앱이 지우는 기안자 서명 필드만 예외로, 실제 기안자 ID와 현재 사용자 일치·기존 원문 한 줄·빈 `서명.1` 필드를 모두 대조한다. 다른 결과 불명 상황에 이 절차를 쓰거나 새 receipt를 만들어 중복 방지를 우회하지 않는다. 재개 후 내부결재 안내와 문서처리 절차는 계속 필요하다.
+
 이후 `retrieveDocSanctn.do` 문서처리 창이 열리면 `final-process --receipt 기록경로`로 실제 선택값과 원문을 확인한다. 같은 문서·출처·창의 미리보기 fingerprint로 `--apply --confirm-final-action --expected-fingerprint 값`을 한 번 실행한다. 비밀번호가 보이거나 공문게시가 선택되어 있으면 실행하지 않는다. 정확한 성공 안내는 `final-ack --receipt 기록경로 --expected-message 실제문구`로 닫을 수 있으며 이 명령은 성공 판정을 대신하지 않는다.
 
 구형 배열 직렬화 검사로 클릭 전에 거절된 기록만 `final-process --audit-rejection`으로 감사할 수 있다. 기록된 시도의 원문·선택창 지문이 지금과 같고 구형 검사가 반드시 거절했음이 재현돼야 하며, 원래 잠금은 유지한다. 현재 버전의 처리 시도나 결과 불명 기록은 이 경로로 재시도할 수 없다.

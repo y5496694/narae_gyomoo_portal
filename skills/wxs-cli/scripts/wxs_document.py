@@ -14,7 +14,7 @@ def restore_export_flags(session, before, after):
         return after
     if before.get("app_type") == "sancview" and before["edit_mode"] == 0 and not before["is_modified"]:
         session.action("restore_export_readonly")
-    elif before.get("app_type") == "sancgian" and not before.get("processed") and before["edit_mode"] == 2:
+    elif before.get("app_type") == "sancgian" and before.get("processed") is False and before["edit_mode"] == 2:
         session.action("set_draft_updated", {"modified": before["is_modified"]})
     else:
         return after

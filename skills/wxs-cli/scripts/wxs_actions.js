@@ -22,6 +22,28 @@ function wxsAction(action, p) {
         IMPL_SetDocumentUpdated("editor1", p.modified);
         return {updated: true};
     }
+    if (action === "route_review_status") {
+        requireDraft();
+        var validatorSource = typeof Validator !== "undefined" && typeof Validator.validate === "function" ? String(Validator.validate) : "";
+        var submitSource = typeof fncSanctn === "function" ? String(fncSanctn) : "";
+        var validateSource = typeof fncValidate === "function" ? String(fncValidate) : "";
+        return {reviewed: typeof pInfo !== "undefined" && !!pInfo.appr_inited,
+                message: typeof lang_chkApprLine === "undefined" ? "" : String(lang_chkApprLine),
+                guard: /if\s*\(\s*!pInfo\.appr_inited\s*\)\s*\{\s*alert\(lang_chkApprLine\)/.test(validatorSource) && /showApprProperty/.test(validatorSource) && /throw \$break/.test(validatorSource),
+                processing_gate: /var valiResult = fncValidate\(\)/.test(submitSource) && /if\s*\(valiResult\)\s*\{\s*showDocSanctnProc/.test(submitSource) && /Validator\.validate\(domHox1\)/.test(validateSource) && /catch\s*\(e\)[\s\S]*return false/.test(validateSource)};
+    }
+    if (action === "route_review_drafter") {
+        requireDraft();
+        need(typeof domHox1 !== "undefined" && typeof get_text === "function", "Draft participant data unavailable");
+        var draftParticipants = domHox1.selectNodes("/hox/approvalFlow/participant"), draftNames = [];
+        for (var dn = 0; dn < draftParticipants.length; dn++) if (String(get_text(draftParticipants[dn], "dutyType")) === "partdtype_initiate") {
+            need(rInfo.user && String(get_text(draftParticipants[dn], "ID")) === String(rInfo.user.ID), "Drafter is not the current user");
+            var draftName = String(rInfo.user.name || "");
+            if (draftNames.length === 0 || draftNames[0] !== draftName) draftNames.push(draftName);
+        }
+        need(draftNames.length === 1 && draftNames[0], "Expected one observed drafter identity");
+        return draftNames[0];
+    }
     if (action === "processing_status" || action === "processing_click" || action === "processing_preflight") {
         need(/\/retrieveDocSanctn\.do$/.test(String(location.pathname)), "Expected the observed document-processing route");
         var fields = [], processingInputs = document.querySelectorAll("input,select,textarea"), submit = el("aSubmit");
@@ -100,12 +122,19 @@ function wxsAction(action, p) {
         } catch (loading) { return false; }
     }
     if (action === "status") {
-        var rows = [], tables = document.getElementsByTagName("table"), reasons = [];
+        var rows = [], tables = document.getElementsByTagName("table"), reasons = [], routeGroups = [], numberedGroups = [];
         for (var i = 0; i < tables.length; i++) {
             if (String(tables[i].innerText || "").indexOf("결재경로표-") === 0) {
-                for (var j = 1; j < tables[i].rows.length; j++) rows.push(String(tables[i].rows[j].innerText));
+                var group = [], numberedRows = [];
+                for (var j = 1; j < tables[i].rows.length; j++) {
+                    var routeRow = String(tables[i].rows[j].innerText); group.push(routeRow);
+                    if (/^\s*\d+/.test(routeRow)) numberedRows.push(routeRow);
+                }
+                routeGroups.push(group); if (numberedRows.length) numberedGroups.push(numberedRows);
             }
         }
+        need(numberedGroups.length <= 1 && (numberedGroups.length === 1 || routeGroups.length <= 1), "Current approval table is ambiguous");
+        rows = numberedGroups.length ? numberedGroups[0] : routeGroups.length ? routeGroups[0] : [];
         for (i = 1; i <= 8; i++) if (document.getElementById("othbcAt" + i) && el("othbcAt" + i).checked) reasons.push(i);
         return {app_type: typeof rInfo === "object" ? String(rInfo.appType) : "",
                 processed: typeof rInfo === "object" && rInfo.docProcessed != null ? !!rInfo.docProcessed : null,

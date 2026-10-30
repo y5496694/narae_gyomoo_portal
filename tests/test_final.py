@@ -8,11 +8,62 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'))
-from wxs_final import prepare, apply, confirm, INTERNAL_CONFIRM, processing_preview, process, audit_processing_rejection, acknowledge, COMPLETION_NOTICE
+from wxs_final import prepare, apply, confirm, INTERNAL_CONFIRM, processing_preview, process, audit_processing_rejection, acknowledge, COMPLETION_NOTICE, ROUTE_REVIEW, resume_route_review
 from wxs_cli import parser, run
 
 
 class FinalTests(unittest.TestCase):
+    def test_native_drafter_signature_clear_is_the_only_allowed_text_change_after_review(self):
+        s=self.session();s.status.return_value['document_text']='머리\n가상 기안자\n본문'
+        p=prepare(s,'submit','합성 문서','상신');button=s.action.return_value
+        proof={'reviewed':False,'message':ROUTE_REVIEW,'guard':True,'processing_gate':True}
+        runtime=SimpleNamespace(Session=lambda w:s,process_windows=lambda pid:[{'hwnd':30,'title':'웹 페이지 메시지'}],alert_details=lambda w:(ROUTE_REVIEW,[]),press_dialog_button=Mock(),native=SimpleNamespace(call=Mock(return_value='')))
+        s.editor=Mock(return_value=object())
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'r.json';apply(s,p,p['fingerprint'],f,True)
+            s.action.side_effect=lambda action,*args:proof if action=='route_review_status' else '가상 기안자' if action=='route_review_drafter' else button
+            confirm(f,ROUTE_REVIEW,True,runtime);proof['reviewed']=True
+            s.status.return_value['document_text']='머리\n\n본문'
+            self.assertFalse(resume_route_review(f,None,False,runtime)['applied'])
+            s.status.return_value['document_text']='머리\n\n다른 본문'
+            with self.assertRaisesRegex(ValueError,'signature reset'):resume_route_review(f,None,False,runtime)
+
+    def test_route_validation_keeps_original_attempt_and_resumes_once_only_after_review(self):
+        s = self.session(); p = prepare(s, 'submit', '합성 문서', '상신')
+        button = s.action.return_value
+        proof = {'reviewed': False, 'message': ROUTE_REVIEW, 'guard': True, 'processing_gate': True}
+        runtime = SimpleNamespace(Session=Mock(return_value=s), process_windows=Mock(return_value=[{'hwnd':30,'title':'웹 페이지 메시지'}]),
+                                  alert_details=Mock(return_value=(ROUTE_REVIEW, [])), press_dialog_button=Mock())
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp)/'receipt.json'; apply(s, p, p['fingerprint'], f, True)
+            s.action.side_effect = lambda action, *args: proof if action == 'route_review_status' else button
+            result = confirm(f, ROUTE_REVIEW, True, runtime)
+            self.assertEqual(result['status'], 'route_review_required')
+            runtime.press_dialog_button.assert_called_once()
+            with self.assertRaisesRegex(ValueError, 'not been confirmed'): resume_route_review(f, None, True, runtime)
+            proof['reviewed'] = True
+            preview = resume_route_review(f, None, False, runtime)
+            with self.assertRaises(ValueError): resume_route_review(f, 'changed', True, runtime, True)
+            result = resume_route_review(f, preview['fingerprint'], True, runtime, True)
+            self.assertFalse(result['completed']); self.assertTrue(result['route_review_resumed'])
+            self.assertTrue(list((Path(tmp)/'.wxs-final-attempts').glob('*.json')))
+            with self.assertRaises(ValueError): resume_route_review(f, preview['fingerprint'], True, runtime, True)
+
+    def test_route_validation_does_not_ack_unknown_guard_or_allow_body_change(self):
+        for changed in ('guard', 'body'):
+            s = self.session(); p = prepare(s, 'submit', '합성 문서', '상신'); button = s.action.return_value
+            proof = {'reviewed':False,'message':ROUTE_REVIEW,'guard':changed!='guard','processing_gate':True}
+            runtime = SimpleNamespace(Session=lambda w:s, process_windows=lambda pid:[{'hwnd':30,'title':'웹 페이지 메시지'}], alert_details=lambda w:(ROUTE_REVIEW,[]),press_dialog_button=Mock())
+            with tempfile.TemporaryDirectory() as tmp:
+                f=Path(tmp)/'receipt.json';apply(s,p,p['fingerprint'],f,True)
+                s.action.side_effect=lambda action,*args:proof if action=='route_review_status' else '가상 기안자' if action=='route_review_drafter' else button
+                if changed=='guard':
+                    with self.assertRaises(ValueError):confirm(f,ROUTE_REVIEW,True,runtime)
+                    runtime.press_dialog_button.assert_not_called()
+                else:
+                    confirm(f,ROUTE_REVIEW,True,runtime);proof['reviewed']=True;s.status.return_value['document_text']='다른 본문'
+                    with self.assertRaisesRegex(ValueError,'outside'):resume_route_review(f,None,True,runtime)
+
     def session(self, operation='submit'):
         status = {'title': '합성 문서', 'processed': False,
                   'app_type': 'sancgian' if operation == 'submit' else 'sanckyul',
