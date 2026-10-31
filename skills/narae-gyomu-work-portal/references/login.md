@@ -52,6 +52,19 @@
 
 ## 업무포털 로그인
 
+### 등록된 보안 문서로 독립 브라우저 자동 로그인
+
+사용자가 보안정보·보안 문서로 자동 로그인을 요청하면 공통 CLI의 `portal.login`을 사용한다. 기본은 독립 업무 브라우저이며 기존 개인 Chrome 연결에는 인증정보를 자동 입력하지 않는다. 등록된 Windows DPAPI 문서는 로컬 실행기가 메모리에서만 읽고, 실제 관찰한 동일 출처의 인증서 암호란에 직접 전달한다. 암호를 모델 인자·명령 인자·평문 JSON·결과·로그로 전달하지 않는다.
+
+```powershell
+narae-gyomu tool call portal.login --args '{"operation":"status"}'
+narae-gyomu tool call portal.login --args '{"operation":"login","systems":["neis","edufine"]}'
+```
+
+나래오피스·나래4의 같은 도구 이름은 `gyomu_portal_login`이다. 공통 구현은 이 스킬의 [portal-login.cjs](../scripts/portal-login.cjs)를 사용한다. 인증서 프레임과 새 창을 현재 화면에서 찾아 등록된 HTTPS 출처와 대조하고, SSO와 서비스 창의 실제 로딩을 기다린다. 모호한 인증서·등록되지 않은 출처·최초 기기 접근 승인·브라우저 밖 인증창·결과 불명은 열린 창과 `stage`를 남긴다. 인증서 제출은 한 번이며 결과 불명 상태에서 브라우저를 재시작하거나 새 시도로 우회하지 않는다.
+
+`authenticated:true`는 업무포털 확인, `systems.neis/edufine`은 요청한 실제 서비스 화면 확인, `complete:true`는 요청 범위 전부 확인이다. 서비스 링크 클릭이나 빈 로딩 화면으로 완료를 판정하지 않는다. 지역·기존 보안 문서 경로·별도 인증서 HTTPS 출처는 각 PC의 로컬 `data/school-profile.json`에 설정하며 공개 Git과 학습 자료에 넣지 않는다.
+
 **사용자의 직접 로그인을 우선한다.** 유효한 세션이 없으면 업무포털을 열어 두고, 가능하면 사용자가 브라우저에서 직접 로그인한 뒤 알려 달라고 안내한다. 직접 로그인에는 인증서 암호를 읽어 올 필요가 없다.
 
 사용자가 자동 로그인을 요청한 경우에만 개인 보안 문서 절차를 사용한다. 시작 전에 다음 내용을 안내한다.
