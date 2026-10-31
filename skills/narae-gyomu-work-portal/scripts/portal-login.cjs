@@ -119,7 +119,8 @@ async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},
    if(!entered.elements?.length){const frames=await browser.execute({action:'frames'});for(const frame of frames.frames||[]){if(!frame.index||/websocket|webReport|내용없음/i.test(frame.name||''))continue;const candidate=await browser.execute({action:'frame',index:frame.index});if(candidate.elements?.length){entered={...candidate,title:product(candidate.title)?candidate.title:entered.title};break;}}}
    const correct=system==='neis'?/나이스|NEIS/i.test(entered.title||''):/K-에듀파인/.test(entered.title||'');
    result.observations[system]={productTitle:correct,loginTitle:/로그인|SSO LOGIN/i.test(entered.title||''),samePortalOrigin:origin(entered.url)===portalOrigin,controls:entered.elements?.length||0,frames:entered.frames?.length||0,permissionRequired:/다른 앱 및 서비스|로컬 네트워크.*(?:허용|액세스)/.test(entered.text||''),errorPage:/오류|오류코드|접속.*실패|1005/.test(entered.text||'')};
-   result.systems[system]=Boolean(correct&&!/로그인|SSO LOGIN/i.test(entered.title||'')&&entered.elements?.length&&origin(entered.url)!==portalOrigin);
+   const evidence=result.observations[system];
+   result.systems[system]=Boolean(correct&&!evidence.loginTitle&&!evidence.permissionRequired&&!evidence.errorPage&&entered.elements?.length&&origin(entered.url)!==portalOrigin);
    if(!result.systems[system]){result.complete=false;result.stage='system_screen_unconfirmed';}
    if(browser.page!==portal&&!portal.isClosed()){browser.page=portal;browser.frame=null;browser.invalidate();}
    else if(origin(entered.url)!==portalOrigin){result.complete=false;result.stage='portal_navigation_changed';break;}
