@@ -22,6 +22,13 @@ async function settle(browser,test,signal,tries=12){
  for(let i=0;i<tries&&!test(screen);i++){if(signal?.aborted)throw Error('로그인을 중단했습니다.');await browser.execute({action:'wait',ms:350});screen=await observe(browser);}
  return screen;
 }
+async function closeInformationalNotices(browser,screen,signal){
+ for(let i=0;i<8&&screen.dialog&&!/인증|암호|접근.*허용|다른 앱 및 서비스/.test(screen.dialog);i++){
+  const close=(screen.elements||[]).filter(e=>!e.disabled&&/^(?:전체닫기|전체 닫기|닫기|공지사항 닫기)$/.test(e.label)),target=close.find(e=>/^전체\s*닫기$/.test(e.label))||(close.length===1?close[0]:null);
+  if(!target)break;if(signal?.aborted)throw Error('로그인을 중단했습니다.');await browser.execute({action:'click',ref:target.ref});screen=await observe(browser);
+ }
+ return screen;
+}
 async function authenticatedPortal(browser,portalOrigin,signal,olderPages=new Set()){
  for(let attempt=0;attempt<24;attempt++){
   for(const page of browser.context?.pages?.()||[browser.page]){
@@ -84,18 +91,20 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
    if(origin(screen.url)!==portalOrigin)screen=await browser.execute({action:'open',url:cfg.portalUrl});
    // Dismiss only an observed informational notice, never an authentication or
    // device-access approval. It may otherwise hide the login button entirely.
-   if(screen.dialog&&!/인증|암호|접근.*허용|다른 앱 및 서비스/.test(screen.dialog)){
-    const close=(screen.elements||[]).filter(e=>!e.disabled&&/^(?:전체닫기|전체 닫기|닫기|공지사항 닫기)$/.test(e.label));
-    const target=close.find(e=>/^전체\s*닫기$/.test(e.label))||(close.length===1?close[0]:null);
-    if(target)screen=await browser.execute({action:'click',ref:target.ref});
-   }
+   screen=await closeInformationalNotices(browser,screen,signal);
    screen=await settle(browser,s=>logged(s)||(s.elements||[]).some(e=>/교육행정.*전자서명.*인증서.*로그인/.test(e.label)),signal);
    if(logged(screen))return login({systems},{cfg,browser,readProfile,state,signal});
-   const certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
+   let certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
    if(certButton?.length!==1)return stop('certificate_button_unconfirmed','인증서 로그인 버튼을 유일하게 확인하지 못했습니다. 현재 창에서 직접 로그인하세요.');
    state.stage='profile_status';const status=await readProfile('Status',cfg,signal);if(!status.valid||status.certificate_path_exists===false)return stop('profile_required','등록된 보안 문서와 인증서 위치를 먼저 확인해야 합니다.');
    state.stage='profile_read';profile=await readProfile('ReadForBrowser',cfg,signal);
    if(profile.region!==cfg.region)return stop('region_mismatch','보안 문서와 업무포털 교육청 설정이 다릅니다.');
+   // Reading the protected profile may take long enough for another on-load
+   // notice to appear. Reobserve before the first certificate click; never
+   // retry an already dispatched or submitted authentication attempt.
+   screen=await closeInformationalNotices(browser,await observe(browser),signal);
+   certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
+   if(certButton?.length!==1)return stop('certificate_button_unconfirmed','보안 문서 확인 후 현재 인증서 로그인 버튼을 확정하지 못했습니다. 인증서 제출은 실행하지 않았습니다.');
    const olderPages=new Set((browser.context?.pages?.()||[]).filter(page=>page!==browser.page));state.attempted=true;state.stage='certificate_open';
    screen=await browser.execute({action:'click',ref:certButton[0].ref});
    const allowed=new Set([portalOrigin,...(cfg.certificateOrigins||[])]),selected=new Set();
