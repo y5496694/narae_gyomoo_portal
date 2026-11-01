@@ -10,10 +10,52 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/wxs-cli/scripts'))
 from wxs_final import prepare, apply, confirm, INTERNAL_CONFIRM, processing_preview, process, audit_processing_rejection, acknowledge, COMPLETION_NOTICE, ROUTE_REVIEW, resume_route_review
 from wxs_cli import parser, run
-from wxs_final import acknowledge_failure
+from wxs_final import acknowledge_failure, PUBLIC_CONFIRM, public_notice_preview, fingerprint, bind_reviewed_processing
 
 
 class FinalTests(unittest.TestCase):
+    def test_public_notice_is_bound_to_the_same_reviewed_internal_processing_attempt_once(self):
+        for issue in ('none', 'not_processing', 'changed', 'private', 'external', 'posting', 'password', 'fingerprint', 'buttons'):
+            with self.subTest(issue=issue), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp)/'receipt.json'
+                binding = {
+                    'document':{'title':'합성 기안', 'processed':False, 'disclosure':'private' if issue=='private' else 'public', 'recipient':'외부기관' if issue=='external' else '내부결재'},
+                    'form':{'fields':[{'id':'sanctn','checked':True}, {'id':'othbcLmtt1','checked':True},
+                                      {'id':'enfcmtRules','checked':issue=='posting'}, {'id':'password','type':'password','visible':issue=='password'}]},
+                    'window':{'hwnd':40,'title':'문서처리'}, 'origin':'https://fixture.invalid/retrieveDocSanctn.do'}
+                reviewed = fingerprint(binding)
+                receipt = {'status':'verification_required', 'operation':'submit', 'processing_attempted':issue!='not_processing',
+                           'processing_fingerprint':reviewed, 'processing_binding':binding, 'window':{'pid':7}, 'fingerprint':'original'}
+                path.write_text(json.dumps(receipt), encoding='utf-8')
+                buttons = [{'class':'Button','text':'확인'}, {'class':'Button','text':'취소'}]
+                document = copy.deepcopy(binding['document'])
+                if issue=='changed': document['title']='다른 기안'
+                session = SimpleNamespace(check_window=Mock(), status=lambda:document, frame_errors=[], origin_path=urlsplit(binding['origin']), action=lambda *a,**kw:binding['form'])
+                runtime = SimpleNamespace(Session=lambda w:session, native=SimpleNamespace(documents=lambda w:([(None,SimpleNamespace(url=binding['origin']))],[])),
+                    process_windows=lambda pid:[{'title':'웹 페이지 메시지','hwnd':30},binding['window']],
+                    alert_details=lambda w:(PUBLIC_CONFIRM, buttons[:1] if issue=='buttons' else buttons), press_dialog_button=Mock())
+                if issue=='none':
+                    self.assertEqual(public_notice_preview(path, runtime)['fingerprint'], reviewed)
+                    result = confirm(path, PUBLIC_CONFIRM, True, runtime, reviewed)
+                    self.assertFalse(result['completed']); self.assertTrue(result['public_confirmation_attempted'])
+                    with self.assertRaises(ValueError): confirm(path, PUBLIC_CONFIRM, True, runtime, reviewed)
+                    runtime.press_dialog_button.assert_called_once()
+                else:
+                    with self.assertRaises(ValueError): confirm(path, PUBLIC_CONFIRM, True, runtime, 'wrong' if issue=='fingerprint' else reviewed)
+                    runtime.press_dialog_button.assert_not_called()
+
+    def test_legacy_processing_binding_cannot_replace_or_forge_the_recorded_preview(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, proof = Path(tmp)/'receipt.json', Path(tmp)/'preview.json'
+            binding={'document':{'title':'합성 기안'}}
+            receipt={'status':'verification_required','processing_attempted':True,'processing_fingerprint':fingerprint(binding)}
+            path.write_text(json.dumps(receipt), encoding='utf-8')
+            proof.write_text(json.dumps({'binding':{'document':{'title':'다른 기안'}},'fingerprint':receipt['processing_fingerprint']}), encoding='utf-8')
+            with self.assertRaises(ValueError): bind_reviewed_processing(path, proof)
+            proof.write_text(json.dumps({'binding':binding,'fingerprint':fingerprint(binding)}), encoding='utf-8')
+            self.assertFalse(bind_reviewed_processing(path, proof)['applied'])
+            with self.assertRaises(ValueError): bind_reviewed_processing(path, proof)
+
     def test_failure_acknowledgement_keeps_attempt_locks_and_never_allows_retry(self):
         for issue in ('none', 'message', 'title', 'processed', 'buttons', 'multiple'):
             with self.subTest(issue=issue), tempfile.TemporaryDirectory() as tmp:

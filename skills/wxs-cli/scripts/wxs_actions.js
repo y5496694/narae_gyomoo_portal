@@ -82,7 +82,7 @@ function wxsAction(action, p) {
         need(draftNames.length === 1 && draftNames[0], "Expected one observed drafter identity");
         return draftNames[0];
     }
-    if (action === "processing_status" || action === "processing_click" || action === "processing_preflight") {
+    if (action === "processing_status" || action === "processing_notice_status" || action === "processing_click" || action === "processing_preflight") {
         need(/\/retrieveDocSanctn\.do$/.test(String(location.pathname)), "Expected the observed document-processing route");
         var fields = [], processingInputs = document.querySelectorAll("input,select,textarea"), submit = el("aSubmit");
         for (var pf = 0; pf < processingInputs.length; pf++) {
@@ -92,11 +92,11 @@ function wxsAction(action, p) {
                          visible: rect.right > rect.left && rect.bottom > rect.top && style.display !== "none" && style.visibility !== "hidden"});
         }
         var sr = submit.getBoundingClientRect();
-        need(sr.right > sr.left && sr.bottom > sr.top, "Processing confirmation is not visible");
+        if (action !== "processing_notice_status") need(sr.right > sr.left && sr.bottom > sr.top, "Processing confirmation is not visible");
         var displayClone = document.body.cloneNode(true), nonDisplay = displayClone.querySelectorAll("script,style,noscript,object");
         for (var nd = nonDisplay.length - 1; nd >= 0; nd--) nonDisplay[nd].parentNode.removeChild(nonDisplay[nd]);
         var state = {title: String(document.title), text: String(displayClone.innerText || displayClone.textContent).replace(/^\s+|\s+$/g, "").slice(0, 20000), fields: fields, button: {id: "aSubmit", label: String(submit.innerText).replace(/^\s+|\s+$/g, ""), disabled: !!submit.disabled}};
-        if (action === "processing_status") return state;
+        if (action === "processing_status" || action === "processing_notice_status") return state;
         var exactState = JSON.stringify(wxsPlain(state)) === JSON.stringify(wxsPlain(p.expected));
         if (action === "processing_preflight") return {exact_state: exactState, legacy_gate_passed: JSON.stringify(wxsPlain(state)) === JSON.stringify(p.expected)};
         need(exactState, "Processing form changed after preview");

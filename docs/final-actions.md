@@ -46,6 +46,8 @@ python $wxsCli final-confirm --receipt $receipt --expected-message '상신하시
 
 이후 `retrieveDocSanctn.do` 문서처리 창이 열리면 `final-process --receipt 기록경로`로 실제 선택값과 원문을 확인한다. 같은 문서·출처·창의 미리보기 fingerprint로 `--apply --confirm-final-action --expected-fingerprint 값`을 한 번 실행한다. 비밀번호가 보이거나 공문게시가 선택되어 있으면 실행하지 않는다. 정확한 성공 안내는 `final-ack --receipt 기록경로 --expected-message 실제문구`로 닫을 수 있으며 이 명령은 성공 판정을 대신하지 않는다.
 
+공개 내부결재의 처리 확인 뒤 원문공개 주의 confirm이 뜨면 같은 receipt의 `final-dialog`가 `processing_public_preview`를 반환한다. 이전 처리 미리보기와 현재 문서·선택값·동일 출처를 대조하고 공개가 사용자 요청과 맞는지 본문·첨부를 검토한다. 그 지문과 실제 원문을 `final-confirm --expected-fingerprint ... --expected-message ... --confirm-final-action`으로 한 번 처리한다. 비공개·외부 수신·공문게시·인증창·변경된 문서는 이 경로에서 거절한다. 구형 기록에 처리 미리보기가 없으면 `final-process --bind-reviewed 원래미리보기.json`이 기존 지문과 정확히 일치하는 자료만 연결한다. 이는 기록 보완이며 클릭·상신 재시도나 잠금 해제가 아니다.
+
 구형 배열 직렬화 검사로 클릭 전에 거절된 기록만 `final-process --audit-rejection`으로 감사할 수 있다. 기록된 시도의 원문·선택창 지문이 지금과 같고 구형 검사가 반드시 거절했음이 재현돼야 하며, 원래 잠금은 유지한다. 현재 버전의 처리 시도나 결과 불명 기록은 이 경로로 재시도할 수 없다.
 
 상신 후 웹 **문서진행**에서 같은 제목·기안자·기안일시와 현재 검토자의 진행 상태를 확인한다. 결재완료 전 문서번호가 `@N`이면 정식 번호로 보고하지 않는다. 실제 문서 식별자와 해당 결재경로의 기안 완료·다음 검토 진행 상태를 함께 기록하고, 정식 번호가 아직 미부여임을 구분한다.

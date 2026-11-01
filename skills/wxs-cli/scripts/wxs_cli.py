@@ -163,6 +163,7 @@ def parser():
     processing.add_argument("--confirm-final-action", action="store_true")
     processing.add_argument("--out", type=Path)
     processing.add_argument("--audit-rejection", action="store_true", help="Prove only an unchanged legacy array guard rejected before click; preserve the original attempt lock")
+    processing.add_argument("--bind-reviewed", type=Path, help="Bind only a hash-matching original legacy processing preview; no UI action")
     ack = commands.add_parser("final-ack", help="Dismiss only the exact observed completion notice, without making a decision")
     ack.add_argument("--receipt", type=Path, required=True)
     ack.add_argument("--expected-message", required=True)
@@ -197,6 +198,8 @@ def run(args):
         raise ValueError("Route-review resume requires --confirm-final-action and --expected-fingerprint")
     if args.command == "final-process" and args.audit_rejection and args.apply:
         raise ValueError("Rejection audit cannot click or be combined with --apply")
+    if args.command == "final-process" and args.bind_reviewed and (args.apply or args.audit_rejection):
+        raise ValueError("Binding a reviewed preview cannot click or audit")
     if args.command == "draft-options" and (args.task_card or args.confirm_route or args.apply):
         task_apply = args.section == "task" and args.task_card and not args.confirm_route
         route_apply = args.section == "approval" and args.confirm_route and not args.task_card
@@ -246,7 +249,9 @@ def run(args):
             return resume_route_review(args.receipt, args.expected_fingerprint, args.confirm_final_action, wxs_runtime, args.apply)
         if args.command == "final-process":
             import wxs_runtime
-            from wxs_final import processing_preview, process, audit_processing_rejection
+            from wxs_final import processing_preview, process, audit_processing_rejection, bind_reviewed_processing
+            if args.bind_reviewed:
+                return bind_reviewed_processing(args.receipt, args.bind_reviewed)
             if args.audit_rejection:
                 return audit_processing_rejection(args.receipt, wxs_runtime)
             preview = processing_preview(args.receipt, wxs_runtime)

@@ -11,6 +11,7 @@ LABELS = {"submit": ("상신", "결재올림"), "approve": ("결재", "결재승
 INTERNAL_CONFIRM = "수신자를 지정하지 않으면 내부결재로 처리됩니다. 계속하시겠습니까?"
 COMPLETION_NOTICE = "정상적으로 처리되었습니다.\n결재완료후 결재완료한 문서가 그대로 보이는 경우, 목록 새로고침을 하시기 바랍니다."
 ROUTE_REVIEW = "결재경로를 확인해 주시기 바랍니다."
+PUBLIC_CONFIRM = "잠깐!!  원문공개 문서는 바로 국민에게 공개됩니다. \n결재 전에 주민번호, 휴대전화번호, 민감정보 등이 있는지 한번 더 확인하시기 바랍니다.\n\n계속 진행하시겠습니까?"
 
 
 def fingerprint(value):
@@ -99,7 +100,48 @@ def inspect_dialog(receipt_path, native_runtime):
         labels = [b["label"] for b in session.action("final_buttons") if b["label"] in LABELS["submit"] and not b["disabled"]]
         if len(labels) == 1:
             result["document_preview"] = prepare(session, "submit", receipt["expected_title"], labels[0])
+    if message == PUBLIC_CONFIRM:
+        result["processing_public_preview"] = public_notice_preview(receipt_path, native_runtime)
     return result
+
+
+def public_notice_preview(receipt_path, native_runtime):
+    receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    if (receipt.get("status") != "verification_required" or receipt.get("operation") != "submit"
+            or not receipt.get("processing_attempted") or receipt.get("public_confirmation_attempted")):
+        raise ValueError("No unconfirmed public-disclosure notice for this processing attempt")
+    from urllib.parse import urlsplit
+    old = receipt.get("processing_binding")
+    if not old or fingerprint(old) != receipt.get("processing_fingerprint"):
+        raise ValueError("The original reviewed processing binding is required")
+    session = native_runtime.Session(receipt["window"])
+    session.check_window()
+    document = session.status()
+    if session.frame_errors or document != old["document"] or document.get("processed") is not False:
+        raise ValueError("Processing document changed before the public-disclosure notice")
+    windows = [w for w in native_runtime.process_windows(receipt["window"]["pid"]) if w["hwnd"] == old["window"]["hwnd"] and "문서처리" in w["title"]]
+    if len(windows) != 1:
+        raise ValueError("The original processing dialog is required")
+    docs, errors = native_runtime.native.documents(windows[0])
+    root = docs[0][1]
+    if errors or str(root.url) != old["origin"] or urlsplit(str(root.url)).netloc != session.origin_path.netloc:
+        raise ValueError("Processing notice origin changed")
+    form = session.action("processing_notice_status", root=root)
+    def comparable(value):
+        return dict(value, fields=[{k:v for k,v in field.items() if k != "visible"} for field in value["fields"]])
+    if comparable(form) != comparable(old["form"]):
+        raise ValueError("Processing options changed before the public-disclosure notice")
+    binding = dict(old, form=form)
+    preview = {"fingerprint":fingerprint(binding), "binding":binding, "applied":False, "completed":False}
+    document, form = preview["binding"]["document"], preview["binding"]["form"]
+    fields = {f["id"]: f for f in form["fields"]}
+    if (document.get("disclosure") != "public" or document.get("recipient") != "내부결재"
+            or not fields.get("sanctn", {}).get("checked")
+            or not fields.get("othbcLmtt1", {}).get("checked")
+            or fields.get("enfcmtRules", {}).get("checked")
+            or any(f.get("type") == "password" and f.get("visible") for f in form["fields"])):
+        raise ValueError("Expected the reviewed internal, public submission without notice posting or authentication")
+    return preview
 
 
 def processing_preview(receipt_path, native_runtime, audit=False):
@@ -166,12 +208,29 @@ def process(receipt_path, preview, expected_fingerprint, authorized, native_runt
     receipt["processing_gate_version"] = 2
     receipt["processing_rejected_before_click"] = False
     receipt["processing_fingerprint"] = expected_fingerprint
+    receipt["processing_binding"] = fresh["binding"]
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
     docs, errors = native_runtime.native.documents(fresh["binding"]["window"])
     if errors:
         raise ValueError("Processing frames changed; attempt retained without retry")
     native_runtime.Session(receipt["window"]).action("processing_click", {"expected": fresh["binding"]["form"]}, root=docs[0][1])
     return dict(receipt, completed=False, evidence="Observed processing confirmation clicked once; verify server document status")
+
+
+def bind_reviewed_processing(receipt_path, preview_path):
+    """Recover only a byte-for-byte hash-bound preview from an older receipt."""
+    path = Path(receipt_path)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    preview = json.loads(Path(preview_path).read_text(encoding="utf-8"))
+    binding = preview.get("binding")
+    if (receipt.get("status") != "verification_required" or not receipt.get("processing_attempted")
+            or receipt.get("processing_binding") or receipt.get("public_confirmation_attempted")
+            or not binding or fingerprint(binding) != receipt.get("processing_fingerprint")
+            or preview.get("fingerprint") != receipt["processing_fingerprint"]):
+        raise ValueError("Only the exact recorded legacy processing preview may be bound")
+    receipt["processing_binding"] = binding
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"bound":True, "applied":False, "completed":False, "evidence":"Original attempt and locks preserved; no UI action"}
 
 
 def confirm(receipt_path, expected_message, authorized, native_runtime, expected_fingerprint=None):
@@ -189,6 +248,18 @@ def confirm(receipt_path, expected_message, authorized, native_runtime, expected
     message, children = native_runtime.alert_details(window)
     if message != expected_message:
         raise ValueError("Site message changed; no confirmation applied")
+    if message == PUBLIC_CONFIRM:
+        preview = public_notice_preview(path, native_runtime)
+        if expected_fingerprint != preview["fingerprint"]:
+            raise ValueError("Review the same public-disclosure processing preview first")
+        if sorted(c.get("text", "").replace("&", "").strip() for c in children if c.get("class") == "Button") != ["취소", "확인"]:
+            raise ValueError("Public-disclosure confirmation buttons changed")
+        with path.with_suffix(path.suffix + ".public-confirmed").open("x", encoding="utf-8") as stream:
+            stream.write(expected_fingerprint)
+        receipt["public_confirmation_attempted"] = True
+        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+        native_runtime.press_dialog_button(window, children, "확인")
+        return dict(receipt, completed=False, evidence="Exact reviewed public-disclosure notice accepted once; verify server status")
     if message == ROUTE_REVIEW and receipt["operation"] == "submit":
         session = native_runtime.Session(receipt["window"])
         state, proof = session.status(), session.action("route_review_status")
