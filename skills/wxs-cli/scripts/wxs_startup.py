@@ -55,3 +55,22 @@ def task_readback(window, expected_title, task_card, create_session, pause=time.
         if attempt < 19:
             pause(.2)
     raise ValueError('Task selection was attempted; readback is unconfirmed. Do not select again.')
+
+
+def select_task_once(session, dialog, expected_title, task_card, create_session):
+    """The zero-delay close can invalidate the action's COM acknowledgment.
+
+    A missing acknowledgment never repeats selection. Only closure and a fresh
+    read of the exact same draft can establish the requested resulting state.
+    """
+    acknowledgment_lost = False
+    try:
+        session.action('task_select', {'name': task_card}, dialog['root'])
+    except Exception as error:
+        if getattr(error, 'hresult', None) != -2147024891:
+            raise
+        acknowledgment_lost = True
+    session.wait_closed(dialog['window'])
+    state = task_readback(session.window, expected_title, task_card, create_session)
+    return {'applied': True, 'status': state,
+            'acknowledgment_lost': acknowledgment_lost, 'selection_attempts': 1}

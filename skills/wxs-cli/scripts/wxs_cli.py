@@ -385,11 +385,9 @@ def run(args):
                         return {"window": matches[0], "search_requested": args.task_query, "selected": False,
                                 "next": "Read the same task dialog again to inspect the refreshed candidates"}
                     if args.apply:
-                        session.action("task_select", {"name": args.task_card}, root)
-                        session.wait_closed(matches[0])
-                        from wxs_startup import task_readback
-                        after = task_readback(window, args.expected_title, args.task_card, Session)
-                        return {"applied": True, "status": after}
+                        from wxs_startup import select_task_once
+                        return select_task_once(session, {'window': matches[0], 'root': root},
+                                                args.expected_title, args.task_card, Session)
                     return {"window": matches[0], "options": session.action("task_options", root=root)}
                 if args.confirm_route:
                     config = load_config(args.confirm_route)

@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 import unittest
 sys.path.insert(0, str(Path(__file__).parents[1] / 'skills/wxs-cli/scripts'))
-from wxs_startup import prepare, apply, task_readback
+from wxs_startup import prepare, apply, task_readback, select_task_once
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
@@ -44,3 +44,27 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(len(calls),2)
         self.state['title'] = '다른 문서'
         with self.assertRaises(ValueError): task_readback(self.session.window,'','[합성과제] 합성과제',create,lambda _:None)
+
+    def test_task_dialog_closing_before_its_com_ack_is_verified_without_reselecting(self):
+        calls = []
+        class ClosingError(Exception): hresult = -2147024891
+        def action(*args):
+            calls.append(args)
+            self.state['task_card'] = '[합성과제] 합성과제'
+            raise ClosingError('dialog already closed before COM attribute read')
+        self.session.action = action
+        self.session.wait_closed = lambda window: calls.append(('closed', window))
+        result = select_task_once(self.session, {'root': 'observed-root', 'window': {'hwnd': 2}},
+                                  '', '[합성과제] 합성과제', lambda window: self.session)
+        self.assertTrue(result['applied'])
+        self.assertTrue(result['acknowledgment_lost'])
+        self.assertEqual(len([call for call in calls if call[0] == 'task_select']), 1)
+        self.assertEqual(result['status']['task_card'], '[합성과제] 합성과제')
+
+    def test_task_validation_errors_are_not_interpreted_as_a_lost_com_ack(self):
+        def action(*args): raise ValueError('ambiguous candidates')
+        self.session.action = action
+        self.session.wait_closed = lambda window: self.fail('validation failure must stop')
+        with self.assertRaisesRegex(ValueError, 'ambiguous candidates'):
+            select_task_once(self.session, {'root': 'observed-root', 'window': {'hwnd': 2}},
+                             '', '[합성과제] 합성과제', lambda window: self.session)
