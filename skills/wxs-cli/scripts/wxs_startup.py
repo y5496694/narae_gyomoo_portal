@@ -18,7 +18,7 @@ def prepare(session, runtime):
         if (message != '열려있는 기안/결재기를 닫습니다.' and not restore) or item['buttons'] != ['확인', '취소']:
             raise ValueError('Unknown startup notice; preserved without response')
     binding = {'window': session.window, 'document': state, 'notices': notices}
-    return {'ready': not notices, 'applied': False, 'fingerprint': fingerprint(binding), 'binding': binding}
+    return {'ready': not notices and session.window.get('enabled', True), 'applied': False, 'fingerprint': fingerprint(binding), 'binding': binding}
 
 
 def apply(session, runtime, expected):
