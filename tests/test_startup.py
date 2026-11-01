@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 import unittest
 sys.path.insert(0, str(Path(__file__).parents[1] / 'skills/wxs-cli/scripts'))
-from wxs_startup import prepare, apply
+from wxs_startup import prepare, apply, task_readback
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
@@ -31,3 +31,16 @@ class StartupTests(unittest.TestCase):
         self.state['body'] = ''
         self.message = '상신하시겠습니까?'
         with self.assertRaises(ValueError): prepare(self.session,self.runtime)
+
+    def test_task_selection_rebinds_after_access_denial_without_mutating_again(self):
+        calls = []
+        class ReloadingError(Exception): hresult = -2147024891
+        def create(window):
+            calls.append(window)
+            if len(calls) == 1: raise ReloadingError('synthetic MSHTML transition')
+            return self.session
+        self.state['task_card'] = '[합성과제] 합성과제'
+        self.assertEqual(task_readback(self.session.window,'','[합성과제] 합성과제',create,lambda _:None)['task_card'],self.state['task_card'])
+        self.assertEqual(len(calls),2)
+        self.state['title'] = '다른 문서'
+        with self.assertRaises(ValueError): task_readback(self.session.window,'','[합성과제] 합성과제',create,lambda _:None)

@@ -361,9 +361,8 @@ def run(args):
                     if args.apply:
                         session.action("task_select", {"name": args.task_card}, root)
                         session.wait_closed(matches[0])
-                        after = session.status()
-                        if args.task_card not in after["task_card"]:
-                            raise ValueError("Task card readback mismatch")
+                        from wxs_startup import task_readback
+                        after = task_readback(window, args.expected_title, args.task_card, Session)
                         return {"applied": True, "status": after}
                     return {"window": matches[0], "options": session.action("task_options", root=root)}
                 if args.confirm_route:

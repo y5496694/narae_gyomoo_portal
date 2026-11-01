@@ -1,5 +1,6 @@
 """Decline stale autosave restore and editor replacement on one new blank draft."""
 import re
+import time
 from wxs_final import fingerprint
 from wxs_route_notice import inspect_notices
 
@@ -34,3 +35,23 @@ def apply(session, runtime, expected):
         declined.append(item['window']['hwnd'])
     return {'applied': True, 'declined': declined, 'restored_autosave': False,
             'existing_editor_preserved': True, 'submission': 'not_attempted'}
+
+
+def task_readback(window, expected_title, task_card, create_session, pause=time.sleep):
+    """Task selection can reload MSHTML. Rebind for reads, never select again."""
+    for attempt in range(20):
+        try:
+            state = create_session(window).status()
+        except Exception as error:
+            if (getattr(error, 'hresult', None) != -2147024891 and
+                    not any(text in str(error) for text in ('Expected one editor1 HwpCtrl', 'Selected WXS page navigated'))):
+                raise
+        else:
+            if (state.get('title') != expected_title or state.get('app_type') != 'sancgian'
+                    or state.get('processed') is not False):
+                raise ValueError('Task selection returned a different document')
+            if task_card in state.get('task_card', ''):
+                return state
+        if attempt < 19:
+            pause(.2)
+    raise ValueError('Task selection was attempted; readback is unconfirmed. Do not select again.')
