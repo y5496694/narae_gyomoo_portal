@@ -16,7 +16,7 @@ function prepareDraft(input={}){
  if(!draft.items.length)missing.push('items');
  const total=draft.items.reduce((sum,i)=>sum+BigInt(i.amount),0n);if(total>BigInt(Number.MAX_SAFE_INTEGER))throw Error('총금액 범위를 초과했습니다.');draft.total=Number(total);
  if(input.total!==undefined&&integer(input.total,'총금액')!==total)throw Error('지정한 총금액과 품목 합계가 다릅니다.');
- if(input.budget!==undefined)draft.budget=text(input.budget,'예산 항목',500);
+ draft.budget=text(input.budget,'예산 항목',500);
  if(!draft.budget)missing.push('budget');
  return {draft,missing,arithmeticVerified:draft.items.length>0,digest:fingerprint(draft),saved:false,submitted:false,budgetSelected:false,remaining:['현재 권한의 실제 예산 선택과 가용액 확인','품목·첨부의 실제 입력 및 대조','명시한 저장 단계와 결재요청의 각각의 결과 확인']};
 }
