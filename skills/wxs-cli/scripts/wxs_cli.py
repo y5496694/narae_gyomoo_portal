@@ -14,6 +14,9 @@ def parser():
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument("--version", action="version", version=VERSION)
     commands = root.add_subparsers(dest="command", required=True)
+    launch = commands.add_parser("launch-registered", help="Preview or launch one browser-observed WXS URI supplied by private stdin")
+    launch.add_argument("--apply", action="store_true")
+    launch.add_argument("--expected-fingerprint")
     notices = commands.add_parser("native-notices", help="Read native web messages in the selected WXS process without accepting them")
     notices.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
     notices.add_argument("--out", type=Path)
@@ -167,6 +170,13 @@ def parser():
 
 
 def run(args):
+    if args.command == "launch-registered":
+        from wxs_launch import launch
+        try:
+            request = json.loads(sys.stdin.read(65537))
+        except Exception:
+            raise ValueError("Expected private WXS launch JSON on stdin") from None
+        return launch(request, apply=args.apply, expected_fingerprint=args.expected_fingerprint)
     if getattr(args, "out", None) and args.out.exists():
         raise ValueError("Output already exists; no operations run")
     if getattr(args, "attachments_dir", None) and args.attachments_dir.exists():
