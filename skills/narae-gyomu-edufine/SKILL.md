@@ -9,7 +9,7 @@ description: "나래교무 업무포털의 K-에듀파인 웹 업무. 문서등�
 
 | 요청 | 절차 |
 | --- | --- |
-| 학교회계 품의목록·품의등록 작성안 | [학교회계 품의](references/school-accounting.md) — 일반 공문 기안과 구분 |
+| 학교회계 품의목록·신규 등록·저장·시험 품의 정리 | [학교회계 품의](references/school-accounting.md) — 서버 재조회·첨부 해시 검증, 일반 공문 기안과 구분 |
 | 문서 검색·기안자별 목록·문서정보 확인 | [문서등록대장](references/document-register.md) |
 | 진행 중인 문서·공람대기·공람완료 확인 | [진행 문서와 공람](references/circulation.md) |
 | 사용자가 맡긴 재기안 후 중복 회수본 정리 | [회수본 정리와 결과 검증](references/recalled-cleanup.md) |
