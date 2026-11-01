@@ -10,7 +10,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Python tests failed.' }
     & $Node tests/test_actions.cjs
     if ($LASTEXITCODE -ne 0) { throw 'JavaScript tests failed.' }
-    & $Node --test tests/test_requisition.cjs tests/test_school_accounting.cjs
+    & $Node --test tests/test_requisition.cjs tests/test_school_accounting.cjs tests/test_requisition_final.cjs
     if ($LASTEXITCODE -ne 0) { throw 'School accounting tests failed.' }
     & $Python -X utf8 skills/wxs-cli/scripts/wxs_cli.py doctor
     if ($LASTEXITCODE -ne 0) { throw 'WXS environment check failed.' }
