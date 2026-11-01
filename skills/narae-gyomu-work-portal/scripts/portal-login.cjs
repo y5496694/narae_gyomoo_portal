@@ -63,6 +63,16 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
  state.stage='observing';let screen=await observe(browser),profile;
  const stop=(stage,message)=>({authenticated:false,complete:false,stage,message,systems:{neis:false,edufine:false}});
  try{
+  if(allow_local_access===true&&!state.attempted&&!state.submitted&&browser.page?.url?.()===cfg.portalUrl&&await browser.page.title()==='업무포털 로그인'){
+   const loading=browser.page.locator('.isloading-overlay');
+   if(await loading.isVisible().catch(()=>false)){
+    // A permission granted after a blocked initial module request needs one
+    // login-page reload. Never reload an authenticated or submitted attempt.
+    if(!state.localAccessReloaded){state.localAccessReloaded=true;await browser.page.reload({waitUntil:'domcontentloaded'});browser.frame=null;browser.invalidate?.();}
+    try{await loading.waitFor({state:'hidden',timeout:15000});}catch{return stop('security_module_loading','포털별 로컬 접근을 허용했으나 보안프로그램 로딩이 끝나지 않았습니다. 인증서 제출은 실행하지 않았습니다.');}
+    screen=await observe(browser);
+   }
+  }
   const currentLogin=origin(screen.url)===portalOrigin&&(screen.elements||[]).some(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
   if(!logged(screen)&&!currentLogin)for(const page of browser.context?.pages?.()||[]){if(page.isClosed()||origin(page.url())!==portalOrigin)continue;browser.page=page;browser.frame=null;browser.invalidate();const candidate=await browser.execute({action:'snapshot'});if(logged(candidate)){screen=candidate;break;}}
   if(!logged(screen)){
