@@ -74,7 +74,11 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
    }
   }
   const currentLogin=origin(screen.url)===portalOrigin&&(screen.elements||[]).some(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
-  if(!logged(screen)&&!currentLogin)for(const page of browser.context?.pages?.()||[]){if(page.isClosed()||origin(page.url())!==portalOrigin)continue;browser.page=page;browser.frame=null;browser.invalidate();const candidate=await browser.execute({action:'snapshot'});if(logged(candidate)){screen=candidate;break;}}
+   if(!logged(screen)&&!currentLogin){
+    const initialPage=browser.page,initialFrame=browser.frame;let found=false;
+    for(const page of browser.context?.pages?.()||[]){if(page===initialPage||page.isClosed()||origin(page.url())!==portalOrigin)continue;browser.page=page;browser.frame=null;browser.invalidate();const candidate=await observe(browser);if(logged(candidate)){screen=candidate;found=true;break;}}
+    if(!found){browser.page=initialPage;browser.frame=initialFrame;browser.invalidate?.();screen=await observe(browser);}
+   }
   if(!logged(screen)){
    if(state.attempted)return stop('manual_login_required','이 세션의 자동 로그인은 이미 한 번 시도했습니다. 직접 로그인 후 현재 화면을 다시 확인하세요.');
    if(origin(screen.url)!==portalOrigin)screen=await browser.execute({action:'open',url:cfg.portalUrl});

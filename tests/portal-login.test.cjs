@@ -65,6 +65,13 @@ test('an observed informational notice is dismissed before reading credentials',
  assert.equal(result.complete,true);assert.equal(reads,2);assert.equal(f.calls.filter(a=>a.ref==='notice-close').length,1);
 });
 
+test('searching other portal tabs refreshes notice refs on the original page',async()=>{
+ const f=fixture(),execute=f.browser.execute,original=f.browser.page,other={url:()=>cfg.portalUrl,isClosed:()=>false};let serial=0,currentRef,notice=true;
+ f.browser.context.pages=()=>[original,other];
+ f.browser.execute=async a=>{if(a.action==='click'&&a.ref.startsWith('notice-')){assert.equal(f.browser.page,original);assert.equal(a.ref,currentRef);notice=false;return execute({action:'snapshot'});}if(f.browser.page===other)return {url:cfg.portalUrl,text:'미인증',elements:[]};if(notice){currentRef='notice-'+ ++serial;return {url:cfg.portalUrl,dialog:'서비스 안내',elements:[{ref:currentRef,label:'전체닫기'}]};}return execute(a);};
+ const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile});assert.equal(result.complete,true);assert.equal(f.browser.page,original);
+});
+
 test('local certificate access is opt-in, dedicated and scoped to the configured HTTPS portal',async()=>{
  const f=fixture(),grants=[];f.browser.context.grantPermissions=async(...args)=>grants.push(args);
  const deps={cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile};
