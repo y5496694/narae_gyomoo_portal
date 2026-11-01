@@ -141,10 +141,11 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
    }}
    if(!entered.elements?.length){const frames=await browser.execute({action:'frames'});for(const frame of frames.frames||[]){if(!frame.index||/websocket|webReport|내용없음/i.test(frame.name||''))continue;const candidate=await browser.execute({action:'frame',index:frame.index});if(candidate.elements?.length){entered={...candidate,title:product(candidate.title)?candidate.title:entered.title};break;}}}
    const correct=system==='neis'?/나이스|NEIS/i.test(entered.title||''):/K-에듀파인/.test(entered.title||'');
-   result.observations[system]={productTitle:correct,loginTitle:/로그인|SSO LOGIN/i.test(entered.title||''),samePortalOrigin:origin(entered.url)===portalOrigin,controls:entered.elements?.length||0,frames:entered.frames?.length||0,permissionRequired:/다른 앱 및 서비스|로컬 네트워크.*(?:허용|액세스)/.test(entered.text||''),errorPage:/오류|오류코드|접속.*실패|1005/.test(entered.text||'')};
+   const httpStatus=Number((entered.text||'').match(/HTTP(?:\s+ERROR)?\s+(\d{3})/i)?.[1])||null;
+   result.observations[system]={productTitle:correct,loginTitle:/로그인|SSO LOGIN/i.test(entered.title||''),samePortalOrigin:origin(entered.url)===portalOrigin,controls:entered.elements?.length||0,frames:entered.frames?.length||0,permissionRequired:/다른 앱 및 서비스|로컬 네트워크.*(?:허용|액세스)/.test(entered.text||''),errorPage:Boolean(httpStatus>=400||/오류|오류코드|접속.*실패|1005/.test(entered.text||'')),...(httpStatus?{httpStatus}:{})};
    const evidence=result.observations[system];
    result.systems[system]=Boolean(correct&&!evidence.loginTitle&&!evidence.permissionRequired&&!evidence.errorPage&&entered.elements?.length&&origin(entered.url)!==portalOrigin);
-   if(!result.systems[system]){result.complete=false;result.stage='system_screen_unconfirmed';}
+   if(!result.systems[system]){result.complete=false;result.stage='system_screen_unconfirmed';if(httpStatus>=400)result.message='업무포털 인증은 완료했지만 '+label+' 진입 화면에서 HTTP '+httpStatus+' 오류를 확인했습니다.';}
    if(browser.page!==portal&&!portal.isClosed()){browser.page=portal;browser.frame=null;browser.invalidate();}
    else if(origin(entered.url)!==portalOrigin){result.complete=false;result.stage='portal_navigation_changed';break;}
   }

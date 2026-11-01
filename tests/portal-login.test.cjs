@@ -39,11 +39,12 @@ test('an uncertain attempt is not reset and attached personal browsers are not u
 });
 
 test('a service product title cannot turn a permission or error page into verified login',async()=>{
- for(const text of ['다른 앱 및 서비스 접근 허용','접속 실패 오류코드 1005']){
+ for(const text of ['다른 앱 및 서비스 접근 허용','접속 실패 오류코드 1005','페이지가 작동하지 않습니다. HTTP ERROR 500']){
   const portal={isClosed:()=>false},popup={isClosed:()=>false};let screen={url:'https://portal.test/main',text:'로그아웃',elements:[{ref:'n',tag:'a',label:'나이스'}]};
   const browser={page:portal,invalidate(){},execute:async a=>{if(a.action==='click'){browser.page=popup;screen={url:'https://neis.test/main',title:'나이스',text,elements:[{label:'확인'}]};}return screen;}};
   const result=await login({systems:['neis']},{cfg,browser});
   assert.equal(result.authenticated,true);assert.equal(result.complete,false);assert.equal(result.systems.neis,false);
+  if(text.includes('HTTP ERROR')){assert.equal(result.observations.neis.httpStatus,500);assert.equal(result.observations.neis.errorPage,true);assert.match(result.message,/인증은 완료.*HTTP 500/);}
  }
 });
 
