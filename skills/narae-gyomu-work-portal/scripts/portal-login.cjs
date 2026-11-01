@@ -36,7 +36,7 @@ async function authenticatedPortal(browser,portalOrigin,signal,olderPages=new Se
   for(const page of browser.context?.pages?.()||[browser.page]){
    if(olderPages.has(page)||page?.isClosed?.()||page?.url&&origin(page.url())!==portalOrigin)continue;
    if(page){browser.page=page;browser.frame=null;browser.invalidate?.();}
-   const screen=await observe(browser);if(logged(screen))return screen;
+   const screen=await closeInformationalNotices(browser,await observe(browser),signal);if(logged(screen))return screen;
   }
   if(signal?.aborted)throw Error('로그인을 중단했습니다.');await browser.execute({action:'wait',ms:350});
  }
@@ -140,7 +140,7 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
   if(!logged(screen))return stop('portal_unconfirmed','로그인된 업무포털을 확인하지 못했습니다.');
   const result={authenticated:true,complete:true,stage:'portal_authenticated',systems:{neis:false,edufine:false},observations:{}};
   for(const system of systems){
-   screen=await observe(browser);const label=system==='neis'?'나이스':'K-에듀파인',matches=screen.elements?.filter(e=>!e.disabled&&normalized(e.label).replace(/\(새창열림\)$/,'')===label),link=matches?.filter(e=>e.role==='link'||e.tag==='a');
+   screen=await closeInformationalNotices(browser,await observe(browser),signal);const label=system==='neis'?'나이스':'K-에듀파인',matches=screen.elements?.filter(e=>!e.disabled&&normalized(e.label).replace(/\(새창열림\)$/,'')===label),link=matches?.filter(e=>e.role==='link'||e.tag==='a');
    const targets=((link?.length?link:matches)||[]).filter(e=>!(/^\d+$/.test(e.id||'')&&/^javascript:/i.test(e.href||''))),urlTargets=targets.filter(e=>/^https?:\/\//.test(e.id||''));
    const links=urlTargets.length?urlTargets:targets;
    if(links?.length!==1){result.complete=false;result.stage='system_link_unconfirmed';continue;}
