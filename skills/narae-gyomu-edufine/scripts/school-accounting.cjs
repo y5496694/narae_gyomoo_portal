@@ -49,7 +49,7 @@ class SchoolAccounting{
   this.root=root;this.target=target;return {ready:true,target,...state,saved:false,submitted:false};
  }
  async grid(root,name){const prefix=root+'.divWork.form.'+name,{elements,truncated}=await this.collect('[id^='+quote(prefix+'.')+'][id$=":text"]');return {...parseGrid(elements,prefix),observationTruncated:truncated};}
- async list(){const view=await this.navigate('list'),root=view.root,base=root+'.divWork.form.divSearch.form.',{elements}=await this.collect('[id^='+quote(base)+'] input');const filterValue=suffix=>elements.find(e=>e.id===base+suffix)?.value;return {kind:'list',scope:'현재 사용자의 사업 예산 권한 및 표시된 검색조건',filters:{fiscalYear:filterValue('cboAccnutYr.comboedit:input'),from:filterValue('calCnsulBeginDte.calendaredit:input'),to:filterValue('calCnsulEndDte.calendaredit:input'),title:filterValue('edtSj:input'),status:filterValue('cboProgrsSts.comboedit:input')},...await this.grid(root,'grdMain'),saved:false,submitted:false,untrusted:true};}
+ async list(){const view=await this.navigate('list'),root=view.root,base=root+'.divWork.form.divSearch.form.',{elements}=await this.collect('[id^='+quote(base)+']:is(input)');const filterValue=suffix=>elements.find(e=>e.id===base+suffix)?.value;return {kind:'list',scope:'현재 사용자의 사업 예산 권한 및 표시된 검색조건',filters:{fiscalYear:filterValue('cboAccnutYr.comboedit:input'),from:filterValue('calCnsulBeginDte.calendaredit:input'),to:filterValue('calCnsulEndDte.calendaredit:input'),title:filterValue('edtSj:input'),status:filterValue('cboProgrsSts.comboedit:input')},...await this.grid(root,'grdMain'),saved:false,submitted:false,untrusted:true};}
  async query(filters={}){
   if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).some(k=>!['fiscalYear','from','to','title','status'].includes(k)))throw Error('지원하는 조회조건을 지정하세요.');
   prepareDraft({requestDate:filters.from,completionDate:filters.to});
@@ -60,7 +60,7 @@ class SchoolAccounting{
   if(filters.status!==undefined)await this.choose(base+'cboProgrsSts',filters.status);
   for(const [key,suffix]of [['from','calCnsulBeginDte.calendaredit:input'],['to','calCnsulEndDte.calendaredit:input'],['title','edtSj:input']])if(filters[key]!==undefined)await this.fillField(base+suffix,filters[key]);
   await this.click(root+'.divWork.form.divAuth.form.btnAuthS01');await this.browser({action:'wait',ms:1000});
-  const {elements}=await this.collect('[id^='+quote(base)+'] input'),observed={};for(const [key,suffix]of [['fiscalYear','cboAccnutYr.comboedit:input'],['from','calCnsulBeginDte.calendaredit:input'],['to','calCnsulEndDte.calendaredit:input'],['title','edtSj:input'],['status','cboProgrsSts.comboedit:input']])observed[key]=elements.find(e=>e.id===base+suffix)?.value;
+  const {elements}=await this.collect('[id^='+quote(base)+']:is(input)'),observed={};for(const [key,suffix]of [['fiscalYear','cboAccnutYr.comboedit:input'],['from','calCnsulBeginDte.calendaredit:input'],['to','calCnsulEndDte.calendaredit:input'],['title','edtSj:input'],['status','cboProgrsSts.comboedit:input']])observed[key]=elements.find(e=>e.id===base+suffix)?.value;
   if(Object.entries(filters).some(([k,v])=>observed[k]!==v))throw Error('조회 후 검색조건이 달라 결과를 확정하지 않습니다.');
   return {kind:'list',queryClicked:true,serverCompletionVerified:false,filters:observed,scope:'현재 사용자 예산 권한 / 렌더링된 행; 조회 클릭 뒤 서버 완료 시각은 미확인',...await this.grid(root,'grdMain'),saved:false,submitted:false,untrusted:true};
  }
