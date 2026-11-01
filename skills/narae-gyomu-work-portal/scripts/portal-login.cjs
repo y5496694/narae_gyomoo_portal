@@ -95,6 +95,7 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
    // device-access approval. It may otherwise hide the login button entirely.
    screen=await closeInformationalNotices(browser,screen,signal);
    screen=await settle(browser,s=>logged(s)||(s.elements||[]).some(e=>/교육행정.*전자서명.*인증서.*로그인/.test(e.label)),signal);
+   screen=await closeInformationalNotices(browser,screen,signal);
    if(logged(screen))return login({systems},{cfg,browser,readProfile,state,signal});
    let certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
    if(certButton?.length!==1)return stop('certificate_button_unconfirmed','인증서 로그인 버튼을 유일하게 확인하지 못했습니다. 현재 창에서 직접 로그인하세요.');
