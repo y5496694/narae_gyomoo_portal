@@ -25,6 +25,11 @@ def parser():
     startup.add_argument("--expected-fingerprint")
     startup.add_argument("--apply", action="store_true")
     startup.add_argument("--out", type=Path)
+    close_blank = commands.add_parser("close-blank", help="Preview or close one unchanged blank editable draft; never accepts a close prompt")
+    close_blank.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    close_blank.add_argument("--expected-fingerprint")
+    close_blank.add_argument("--apply", action="store_true")
+    close_blank.add_argument("--out", type=Path)
     failure = commands.add_parser("final-failure-ack", help="Dismiss the exact failed-processing notice without unlocking or retrying its attempt")
     failure.add_argument("--receipt", type=Path, required=True)
     failure.add_argument("--expected-message", required=True)
@@ -272,6 +277,27 @@ def run(args):
             from wxs_final import confirm
             return confirm(args.receipt, args.expected_message, args.confirm_final_action, wxs_runtime, args.expected_fingerprint)
         window = native.select_window(args)
+        if args.command == "close-blank":
+            import time
+            import win32gui
+            import wxs_runtime
+            from wxs_startup import prepare
+            session = wxs_runtime.Session(window)
+            preview = prepare(session, wxs_runtime)
+            if not preview['ready'] or session.frame_errors:
+                raise ValueError('Only an enabled unchanged blank draft with all frames verified can close')
+            if not args.apply:
+                return preview
+            if not args.expected_fingerprint or args.expected_fingerprint != preview['fingerprint']:
+                raise ValueError('Blank draft changed; no close')
+            session.check_window()
+            win32gui.PostMessage(window['hwnd'], 0x0010, 0, 0)
+            deadline = time.monotonic() + 5
+            while win32gui.IsWindow(window['hwnd']) and time.monotonic() < deadline:
+                time.sleep(.1)
+            if win32gui.IsWindow(window['hwnd']):
+                raise ValueError('Blank draft did not close. No prompt accepted; do not force terminate.')
+            return {'closed': True, 'unchanged_blank': True, 'window': window, 'submission': 'not_attempted'}
         if args.command == "draft-startup":
             import time
             import wxs_runtime
