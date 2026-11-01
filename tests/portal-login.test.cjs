@@ -64,3 +64,11 @@ test('an observed informational notice is dismissed before reading credentials',
  const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>{assert.equal(notice,false);reads++;return a==='Status'?{valid:true}:f.profile;}});
  assert.equal(result.complete,true);assert.equal(reads,2);assert.equal(f.calls.filter(a=>a.ref==='notice-close').length,1);
 });
+
+test('local certificate access is opt-in, dedicated and scoped to the configured HTTPS portal',async()=>{
+ const f=fixture(),grants=[];f.browser.context.grantPermissions=async(...args)=>grants.push(args);
+ const deps={cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile};
+ await login({},deps);assert.equal(grants.length,0);
+ await login({allow_local_access:true},deps);assert.deepEqual(grants,[[['local-network-access'],{origin:'https://portal.test'}]]);
+ f.browser.attached=true;await login({allow_local_access:true},deps);assert.equal(grants.length,1);
+});

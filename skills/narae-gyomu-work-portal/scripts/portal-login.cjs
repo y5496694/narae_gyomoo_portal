@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),{execFile}=require('node:child_process');
-const tool={type:'function',name:'gyomu_portal_login',description:'PC의 DPAPI 보안 문서로 업무포털 자동 로그인을 한 번 시도하고 요청한 나이스·에듀파인 진입을 실제 화면으로 확인한다. 비밀값은 모델·로그에 반환하지 않는다. 최초 로컬 접근 승인과 WXS 추가 보안문서 인증은 사용자 단계로 남긴다.',parameters:{type:'object',properties:{operation:{enum:['status','login']},systems:{type:'array',items:{enum:['neis','edufine']},uniqueItems:true}},required:['operation'],additionalProperties:false}};
+const tool={type:'function',name:'gyomu_portal_login',description:'PC의 DPAPI 보안 문서로 업무포털 자동 로그인을 한 번 시도하고 요청한 나이스·에듀파인 진입을 실제 화면으로 확인한다. 비밀값은 모델·로그에 반환하지 않는다. 사용자가 맡긴 로컬 인증서 프로그램 접근은 allow_local_access로 해당 포털에만 허용한다. WXS 추가 보안문서 인증은 별도다.',parameters:{type:'object',properties:{operation:{enum:['status','login']},systems:{type:'array',items:{enum:['neis','edufine']},uniqueItems:true},allow_local_access:{type:'boolean',description:'사용자가 자동 로그인에 필요한 로컬 인증서 프로그램 접근까지 맡긴 경우만 true. 등록된 HTTPS 업무포털 origin 한 곳에만 브라우저 로컬 네트워크 권한을 부여한다.'}},required:['operation'],additionalProperties:false}};
 const helper=path.join(__dirname,'certificate-profile.ps1');
 function config(home){const file=path.join(home,'data/school-profile.json'),defaults={region:'충북',portalUrl:'https://cbe.eduptl.kr/bpm_lgn_lg00_001.do'};return {...defaults,...(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{})};}
 function configure(home,value){
@@ -56,9 +56,10 @@ function certificateCandidates(screen,label,certificate=false){
  const candidates=(screen.elements||[]).filter(e=>!e.disabled&&normalized(e.label)===normalized(label));if(candidates.length)return candidates;
  return certificate?(screen.elements||[]).filter(e=>!e.disabled&&(e.role==='row'||e.tag==='tr')&&normalized(e.label).includes(normalized(label))):[];
 }
-async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},signal}){
+async function login({systems=[],allow_local_access=false},{cfg,browser,readProfile=loadProfile,state={},signal}){
  const portalOrigin=origin(cfg.portalUrl);if(!portalOrigin.startsWith('https://'))throw new Error('확인된 HTTPS 업무포털 주소가 필요합니다.');
  if(browser.attached)return {authenticated:false,complete:false,stage:'dedicated_browser_required',message:'등록된 인증서는 독립 업무 브라우저에서 로그인합니다.'};
+ if(allow_local_access===true){if(!browser.context?.grantPermissions)return {authenticated:false,complete:false,stage:'local_access_unsupported',message:'이 브라우저는 포털별 로컬 인증서 프로그램 접근 허용을 지원하지 않습니다.'};await browser.context.grantPermissions(['local-network-access'],{origin:portalOrigin});state.localAccessGranted=true;}
  state.stage='observing';let screen=await observe(browser),profile;
  const stop=(stage,message)=>({authenticated:false,complete:false,stage,message,systems:{neis:false,edufine:false}});
  try{
