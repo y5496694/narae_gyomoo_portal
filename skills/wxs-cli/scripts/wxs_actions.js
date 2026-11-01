@@ -14,7 +14,10 @@ function wxsAction(action, p) {
         need(typeof Attach.syncNew === "function" && typeof hsattach !== "undefined", "Native attachment upload integration unavailable");
         var app = String(rInfo.applID), explicit = {"6010":true,"8010":true,"6023":true,"6022":true,"6056":true,"6024":true};
         if (explicit[app] || Attach._naraeLocalUploadBound) return;
-        need(app === "2020", "Unverified attachment upload application; no metadata-only addition applied");
+        var freshStandard = app === "-1" && rInfo.appType === "sancgian" && rInfo.docProcessed === false &&
+            String(rInfo.apprMsgID) === "00000000000000000000" && typeof domHox1 !== "undefined" &&
+            typeof get_text === "function" && String(get_text(domHox1, "/hox/docInfo/ID")) === "";
+        need(app === "2020" || freshStandard, "Unverified attachment upload application; no metadata-only addition applied");
         var original = Attach.syncNew, source = String(original);
         need(/file\.atPc/.test(source) && /this\.appendTo/.test(source) && /this\.element\.setAttachNameByGroup/.test(source), "Native attachment ID-allocation branch changed");
         need(typeof hsattach.AddFlashFile === "function" || typeof hsattach.AddFlashFile === "unknown", "Native byte-upload method unavailable");
@@ -34,6 +37,7 @@ function wxsAction(action, p) {
             }
             var ids = original.apply(this, arguments);
             if (ids === false || ids == null) return ids;
+            if (explicit[String(rInfo.applID)]) return ids;
             need(ids.length === current.length, "Native attachment ID count changed");
             for (var uq = 0; uq < local.length; uq++) {
                 var id = ids[local[uq].index];

@@ -252,4 +252,12 @@ test('standard upload adapter preserves native data-collection registration with
   assert.equal(uploads.length,2);
   assert.deepEqual(uploads.map(item=>item.path).sort(),['collection.pdf','normal.pdf']);
 });
+test('only an unprocessed empty-ID fresh standard template supports initial local upload',()=>{
+  for(const options of [{app:'-1',msg:'00000000000000000000',doc:'',accepted:true},{app:'-1',msg:'existing-message',doc:'',accepted:false},{app:'-1',msg:'00000000000000000000',doc:'existing-doc',accepted:false},{app:'9999',msg:'00000000000000000000',doc:'',accepted:false}]){
+    const files=[],uploads=[];let nativeCalls=0,c;const attach={element:{setAttachNameByGroup(){}},appendTo(){},fileBox:{files(){return files;},fileListAtGroup(){return files;}},addFiles(incoming){files.push(...incoming);},onrefresh(){},syncNew:function(){nativeCalls++;var file={atPc:true};if(file.atPc)this.appendTo();this.element.setAttachNameByGroup();if(c.rInfo.applID==='8010')c.hsattach.AddFlashFile('synthetic.pdf','native-id');return ['native-id'];}};
+    c=ctx({rInfo:{appType:'sancgian',docProcessed:false,applID:options.app,apprMsgID:options.msg},domHox1:{},get_text(){return options.doc;},Attach:attach,HsFile:function(path,name,size){Object.assign(this,{path,name,size,atPc:true});},hsattach:{AddFlashFile(path,id){uploads.push({path,id});}},FileManager:{GetFile(){return {Size:4};}}});
+    if(!options.accepted){assert.throws(()=>c.wxsAction('attach',{path:'synthetic.pdf',name:'synthetic.pdf',size:4,expected_count:0}),/Unverified/);assert.equal(files.length,0);assert.equal(nativeCalls,0);continue;}
+    c.wxsAction('attach',{path:'synthetic.pdf',name:'synthetic.pdf',size:4,expected_count:0});attach.syncNew();assert.equal(uploads.length,1);assert.equal(nativeCalls,1);uploads.length=0;c.rInfo.applID='8010';attach.syncNew();assert.equal(uploads.length,1);assert.equal(nativeCalls,2);
+  }
+});
 console.log(`${count} action tests passed; no real application or network used.`);
