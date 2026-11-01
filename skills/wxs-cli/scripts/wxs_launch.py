@@ -18,7 +18,7 @@ def validate_request(request):
     if request["source_origin"] != "https://klef.cbe.go.kr":
         raise ValueError("Launch source is not the observed K-Ed ufine HTTPS origin")
     uri = request["url"]
-    match = re.fullmatch(r"wxsclient:/{1,3}open&url:([^&]+)&title:([^&]+)&windowsize:([^&]+)", uri) if isinstance(uri, str) and len(uri) <= 32768 else None
+    match = re.fullmatch(r"wxsclient:(?://handysoft\.co\.kr/|/{1,3})open&url:([^&]+)&title:([^&]+)&windowsize:([^&]+)", uri, flags=re.I) if isinstance(uri, str) and len(uri) <= 32768 else None
     if not match:
         raise ValueError("Unsupported registered WXS launch URI")
     try:

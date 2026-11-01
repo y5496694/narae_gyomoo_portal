@@ -39,6 +39,14 @@ class LaunchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.validate_request(raw)
 
+    def test_observed_handysoft_protocol_authority_is_supported_without_allowing_other_authorities(self):
+        raw = request()
+        raw["url"] = raw["url"].replace("wxsclient:/open", "wxsclient://handysoft.co.kr/open")
+        self.assertEqual(module.validate_request(raw)["protocol"], "wxsclient")
+        raw["url"] = raw["url"].replace("handysoft.co.kr", "other.invalid")
+        with self.assertRaises(ValueError):
+            module.validate_request(raw)
+
 
 if __name__ == "__main__":
     unittest.main()
