@@ -20,6 +20,11 @@ def parser():
     notices = commands.add_parser("native-notices", help="Read native web messages in the selected WXS process without accepting them")
     notices.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
     notices.add_argument("--out", type=Path)
+    startup = commands.add_parser("draft-startup", help="Inspect or decline known restore/switch notices on one unchanged blank new draft")
+    startup.add_argument("--hwnd", type=lambda value: int(value, 0), required=True)
+    startup.add_argument("--expected-fingerprint")
+    startup.add_argument("--apply", action="store_true")
+    startup.add_argument("--out", type=Path)
     failure = commands.add_parser("final-failure-ack", help="Dismiss the exact failed-processing notice without unlocking or retrying its attempt")
     failure.add_argument("--receipt", type=Path, required=True)
     failure.add_argument("--expected-message", required=True)
@@ -267,6 +272,21 @@ def run(args):
             from wxs_final import confirm
             return confirm(args.receipt, args.expected_message, args.confirm_final_action, wxs_runtime, args.expected_fingerprint)
         window = native.select_window(args)
+        if args.command == "draft-startup":
+            import time
+            import wxs_runtime
+            from wxs_startup import prepare, apply
+            deadline = time.monotonic() + 20
+            while True:
+                try:
+                    session = wxs_runtime.Session(window)
+                    preview = prepare(session, wxs_runtime)
+                    break
+                except (ValueError, RuntimeError) as error:
+                    if 'Expected one editor1 HwpCtrl' not in str(error) or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(.3)
+            return apply(session, wxs_runtime, args.expected_fingerprint) if args.apply else preview
         if args.command == "open-attachment":
             from wxs_runtime import Session
             session = Session(window)
