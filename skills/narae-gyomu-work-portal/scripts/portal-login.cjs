@@ -22,10 +22,10 @@ async function settle(browser,test,signal,tries=12){
  for(let i=0;i<tries&&!test(screen);i++){if(signal?.aborted)throw Error('로그인을 중단했습니다.');await browser.execute({action:'wait',ms:350});screen=await observe(browser);}
  return screen;
 }
-async function authenticatedPortal(browser,portalOrigin,signal){
+async function authenticatedPortal(browser,portalOrigin,signal,olderPages=new Set()){
  for(let attempt=0;attempt<24;attempt++){
   for(const page of browser.context?.pages?.()||[browser.page]){
-   if(page?.isClosed?.()||page?.url&&origin(page.url())!==portalOrigin)continue;
+   if(olderPages.has(page)||page?.isClosed?.()||page?.url&&origin(page.url())!==portalOrigin)continue;
    if(page){browser.page=page;browser.frame=null;browser.invalidate?.();}
    const screen=await observe(browser);if(logged(screen))return screen;
   }
@@ -62,7 +62,8 @@ async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},
  let screen=await observe(browser),profile;
  const stop=(stage,message)=>({authenticated:false,complete:false,stage,message,systems:{neis:false,edufine:false}});
  try{
-  if(!logged(screen))for(const page of browser.context?.pages?.()||[]){if(page.isClosed()||origin(page.url())!==portalOrigin)continue;browser.page=page;browser.frame=null;browser.invalidate();const candidate=await browser.execute({action:'snapshot'});if(logged(candidate)){screen=candidate;break;}}
+  const currentLogin=origin(screen.url)===portalOrigin&&(screen.elements||[]).some(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
+  if(!logged(screen)&&!currentLogin)for(const page of browser.context?.pages?.()||[]){if(page.isClosed()||origin(page.url())!==portalOrigin)continue;browser.page=page;browser.frame=null;browser.invalidate();const candidate=await browser.execute({action:'snapshot'});if(logged(candidate)){screen=candidate;break;}}
   if(!logged(screen)){
    if(state.attempted)return stop('manual_login_required','이 세션의 자동 로그인은 이미 한 번 시도했습니다. 직접 로그인 후 현재 화면을 다시 확인하세요.');
    if(origin(screen.url)!==portalOrigin)screen=await browser.execute({action:'open',url:cfg.portalUrl});
@@ -73,7 +74,7 @@ async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},
    const status=await readProfile('Status',cfg,signal);if(!status.valid||status.certificate_path_exists===false)return stop('profile_required','등록된 보안 문서와 인증서 위치를 먼저 확인해야 합니다.');
    profile=await readProfile('ReadForBrowser',cfg,signal);
    if(profile.region!==cfg.region)return stop('region_mismatch','보안 문서와 업무포털 교육청 설정이 다릅니다.');
-   state.attempted=true;
+   const olderPages=new Set((browser.context?.pages?.()||[]).filter(page=>page!==browser.page));state.attempted=true;
    screen=await browser.execute({action:'click',ref:certButton[0].ref});
    const allowed=new Set([portalOrigin,...(cfg.certificateOrigins||[])]),selected=new Set();
    screen=await authenticationScreen(browser,allowed,profile,signal);
@@ -95,7 +96,7 @@ async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},
      const confirm=screen.elements.filter(e=>!e.disabled&&/^(확인|로그인)$/.test(e.label));if(confirm.length!==1)return stop('confirmation_unconfirmed','로그인 확인 버튼이 유일하지 않습니다. 암호 입력 이후 재시도하지 않습니다.');
      state.submitted=true;
      try{await browser.execute({action:'click',ref:confirm[0].ref});}catch{state.clickResultUnconfirmed=true;}
-     try{browser.frame=null;screen=await authenticatedPortal(browser,portalOrigin,signal);}catch{return stop('login_result_unknown','자동 로그인 제출 후 결과를 확인하지 못했습니다. 직접 로그인으로 이어가세요.');}
+     try{browser.frame=null;screen=await authenticatedPortal(browser,portalOrigin,signal,olderPages);}catch{return stop('login_result_unknown','자동 로그인 제출 후 결과를 확인하지 못했습니다. 직접 로그인으로 이어가세요.');}
      if(!logged(screen))return stop('login_result_unknown','자동 로그인 제출 후 로그인된 업무포털 화면을 확인하지 못했습니다. 자동 제출은 반복하지 않습니다.');
      break;
     }
@@ -106,7 +107,7 @@ async function login({systems=[]},{cfg,browser,readProfile=loadProfile,state={},
   const result={authenticated:true,complete:true,stage:'portal_authenticated',systems:{neis:false,edufine:false},observations:{}};
   for(const system of systems){
    screen=await observe(browser);const label=system==='neis'?'나이스':'K-에듀파인',matches=screen.elements?.filter(e=>!e.disabled&&normalized(e.label).replace(/\(새창열림\)$/,'')===label),link=matches?.filter(e=>e.role==='link'||e.tag==='a');
-   const targets=(link?.length?link:matches)||[],urlTargets=targets.filter(e=>/^https?:\/\//.test(e.id||''));
+   const targets=((link?.length?link:matches)||[]).filter(e=>!(/^\d+$/.test(e.id||'')&&/^javascript:/i.test(e.href||''))),urlTargets=targets.filter(e=>/^https?:\/\//.test(e.id||''));
    const links=urlTargets.length?urlTargets:targets;
    if(links?.length!==1){result.complete=false;result.stage='system_link_unconfirmed';continue;}
    const portal=browser.page;let entered;

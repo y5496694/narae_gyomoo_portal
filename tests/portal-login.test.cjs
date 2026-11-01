@@ -46,3 +46,14 @@ test('a service product title cannot turn a permission or error page into verifi
   assert.equal(result.authenticated,true);assert.equal(result.complete,false);assert.equal(result.systems.neis,false);
  }
 });
+
+test('a current server login screen takes precedence over an older main tab',async()=>{
+ const f=fixture(),actual=f.browser.page,stale={url:()=> 'https://portal.test/main',isClosed:()=>false},execute=f.browser.execute;let reads=0;
+ f.browser.context.pages=()=>[stale,actual];f.browser.execute=async a=>f.browser.page===stale?{url:stale.url(),text:'Logout',elements:[{label:'나이스'}]}:execute(a);
+ const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>{reads++;return a==='Status'?{valid:true}:f.profile;}});
+ assert.equal(result.authenticated,true);assert.equal(reads,2);assert.equal(f.calls.filter(a=>a.privateFill).length,1);assert.equal(f.browser.page,actual);
+});
+test('a notification category with the system name is not a service launch link',async()=>{
+ const calls=[],screen={url:'https://portal.test/main',text:'Logout',elements:[{label:'나이스'},{label:'K-에듀파인',tag:'a',id:'2',href:'javascript:void(0)',ref:'filter'}]},browser={execute:async a=>{calls.push(a);return screen;}};
+ const result=await login({systems:['edufine']},{cfg,browser});assert.equal(result.complete,false);assert.equal(result.stage,'system_link_unconfirmed');assert(!calls.some(a=>a.action==='click'));
+});
