@@ -57,3 +57,10 @@ test('a notification category with the system name is not a service launch link'
  const calls=[],screen={url:'https://portal.test/main',text:'Logout',elements:[{label:'나이스'},{label:'K-에듀파인',tag:'a',id:'2',href:'javascript:void(0)',ref:'filter'}]},browser={execute:async a=>{calls.push(a);return screen;}};
  const result=await login({systems:['edufine']},{cfg,browser});assert.equal(result.complete,false);assert.equal(result.stage,'system_link_unconfirmed');assert(!calls.some(a=>a.action==='click'));
 });
+
+test('an observed informational notice is dismissed before reading credentials',async()=>{
+ const f=fixture(),execute=f.browser.execute;let notice=true,reads=0;
+ f.browser.execute=async a=>{if(a.action==='click'&&a.ref==='notice-close'){notice=false;f.calls.push(a);return execute({action:'snapshot'});}return notice?{url:cfg.portalUrl,dialog:'서비스 이용 안내',elements:[{ref:'notice-close',label:'전체닫기'}]}:execute(a);};
+ const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>{assert.equal(notice,false);reads++;return a==='Status'?{valid:true}:f.profile;}});
+ assert.equal(result.complete,true);assert.equal(reads,2);assert.equal(f.calls.filter(a=>a.ref==='notice-close').length,1);
+});
