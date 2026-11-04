@@ -45,6 +45,27 @@ test('an uncertain attempt is not reset and attached personal browsers are not u
  f.browser.attached=true;assert.equal((await login({},deps)).stage,'dedicated_browser_required');
 });
 
+test('an existing certificate selection can continue only before any password attempt',async()=>{
+ for(const passwordAttempted of [false,true]){
+  const f=fixture(),execute=f.browser.execute;
+  await execute({action:'click',ref:'l'});
+  const certScreen={url:cfg.portalUrl,elements:[{ref:'disk',label:'하드디스크'},{ref:'pw',type:'password'}]};
+  let first=true;f.browser.execute=async a=>{if(first&&a.action==='snapshot'){first=false;return certScreen;}return execute(a);};
+  const state={attempted:true,stage:'certificate_open',passwordAttempted};
+  const result=await login({}, {cfg,browser:f.browser,state,readProfile:async a=>a==='Status'?{valid:true}:f.profile});
+  assert.equal(f.calls.filter(a=>a.ref==='l').length,1);
+  assert.equal(f.calls.filter(a=>a.privateFill).length,passwordAttempted?0:1);
+  assert.equal(result.complete,!passwordAttempted);
+ }
+});
+
+test('storage click waits for a delayed certificate inventory without opening authentication again',async()=>{
+ const f=fixture(),execute=f.browser.execute;let pending=false,waits=0;
+ f.browser.execute=async a=>{const result=await execute(a);if(a.ref==='disk')pending=true;if(pending&&a.action==='wait'&&++waits>=2)pending=false;return pending?{url:cfg.portalUrl,elements:[{type:'password'},{ref:'ok',label:'확인'}]}:result;};
+ const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile});
+ assert.equal(result.complete,true);assert.equal(f.calls.filter(a=>a.ref==='l').length,1);assert.equal(f.calls.filter(a=>a.privateFill).length,1);
+});
+
 test('a service product title cannot turn a permission or error page into verified login',async()=>{
  for(const text of ['다른 앱 및 서비스 접근 허용','접속 실패 오류코드 1005','페이지가 작동하지 않습니다. HTTP ERROR 500']){
   const portal={isClosed:()=>false},popup={isClosed:()=>false};let screen={url:'https://portal.test/main',text:'로그아웃',elements:[{ref:'n',tag:'a',label:'나이스'}]};

@@ -74,7 +74,9 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
  const portalOrigin=origin(cfg.portalUrl);if(!portalOrigin.startsWith('https://'))throw new Error('확인된 HTTPS 업무포털 주소가 필요합니다.');
  if(browser.attached)return {authenticated:false,complete:false,stage:'dedicated_browser_required',message:'등록된 인증서는 독립 업무 브라우저에서 로그인합니다.'};
  if(allow_local_access===true){if(!browser.context?.grantPermissions)return {authenticated:false,complete:false,stage:'local_access_unsupported',message:'이 브라우저는 포털별 로컬 인증서 프로그램 접근 허용을 지원하지 않습니다.'};await browser.context.grantPermissions(['local-network-access'],{origin:portalOrigin});state.localAccessGranted=true;}
+ const canContinue=state.attempted&&!state.submitted&&!state.passwordAttempted&&state.stage==='certificate_open';
  state.stage='observing';let screen=await observe(browser),profile;
+ const resuming=canContinue&&screen.elements?.some(e=>e.type==='password')&&screen.elements?.some(e=>/^(하드디스크|이동식디스크)$/.test(normalized(e.label)));
  const stop=(stage,message)=>({authenticated:false,complete:false,stage,message,systems:{neis:false,edufine:false}});
  try{
   if(allow_local_access===true&&!state.attempted&&!state.submitted&&browser.page?.url?.()===cfg.portalUrl&&await browser.page.title()==='업무포털 로그인'){
@@ -94,7 +96,9 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
     if(!found){browser.page=initialPage;browser.frame=initialFrame;browser.invalidate?.();screen=await observe(browser);}
    }
   if(!logged(screen)){
-   if(state.attempted)return stop('manual_login_required','이 세션의 자동 로그인은 이미 한 번 시도했습니다. 직접 로그인 후 현재 화면을 다시 확인하세요.');
+   if(state.attempted&&!resuming)return stop('manual_login_required','이 세션의 자동 로그인은 이미 한 번 시도했습니다. 직접 로그인 후 현재 화면을 다시 확인하세요.');
+   if(resuming&&origin(screen.url)!==portalOrigin)return stop('certificate_origin_unconfirmed','기존 인증서 선택창의 출처가 바뀌었습니다. 제출하지 않았습니다.');
+   if(!resuming){
    if(origin(screen.url)!==portalOrigin)screen=await browser.execute({action:'open',url:cfg.portalUrl});
    // Dismiss only an observed informational notice, never an authentication or
    // device-access approval. It may otherwise hide the login button entirely.
@@ -104,17 +108,21 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
    if(logged(screen))return login({systems},{cfg,browser,readProfile,state,signal});
    let certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
    if(certButton?.length!==1)return stop('certificate_button_unconfirmed','인증서 로그인 버튼을 유일하게 확인하지 못했습니다. 현재 창에서 직접 로그인하세요.');
+   }
    state.stage='profile_status';const status=await readProfile('Status',cfg,signal);if(!status.valid||status.certificate_path_exists===false)return stop('profile_required','등록된 보안 문서와 인증서 위치를 먼저 확인해야 합니다.');
    state.stage='profile_read';profile=await readProfile('ReadForBrowser',cfg,signal);
    if(profile.region!==cfg.region)return stop('region_mismatch','보안 문서와 업무포털 교육청 설정이 다릅니다.');
    // Reading the protected profile may take long enough for another on-load
    // notice to appear. Reobserve before the first certificate click; never
    // retry an already dispatched or submitted authentication attempt.
+   if(!resuming){
    screen=await closeInformationalNotices(browser,await observe(browser),signal);
-   certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
+   const certButton=screen.elements?.filter(e=>!e.disabled&&/교육행정.*전자서명.*인증서.*로그인/.test(e.label));
    if(certButton?.length!==1)return stop('certificate_button_unconfirmed','보안 문서 확인 후 현재 인증서 로그인 버튼을 확정하지 못했습니다. 인증서 제출은 실행하지 않았습니다.');
-   const olderPages=new Set((browser.context?.pages?.()||[]).filter(page=>page!==browser.page));state.attempted=true;state.stage='certificate_open';
+   state.attempted=true;state.stage='certificate_open';
    screen=await browser.execute({action:'click',ref:certButton[0].ref});
+   }
+   const olderPages=new Set((browser.context?.pages?.()||[]).filter(page=>page!==browser.page));state.stage='certificate_open';
    const allowed=new Set([portalOrigin,...(cfg.certificateOrigins||[])]),selected=new Set();
    screen=await authenticationScreen(browser,allowed,profile,signal);
    for(let step=0;step<12;step++){
@@ -124,13 +132,13 @@ async function login({systems=[],allow_local_access=false},{cfg,browser,readProf
     if(/다른 앱 및 서비스|로컬 네트워크.*(?:허용|액세스)/.test(screen.text||''))return stop('first_use_permission','최초 기기·로컬 앱 접근 승인은 사용자가 이 창에서 직접 완료해야 합니다.');
     const labels=[profile.storage_type==='Removable'?'이동식 디스크':'하드디스크',...(profile.storage_type==='Removable'?[profile.disk_label||profile.disk_drive]:[]),profile.storage_name,profile.certificate_name].filter(Boolean);
     const next=labels.find(label=>!selected.has(label)&&certificateCandidates(screen,label,label===profile.certificate_name).length);
-    if(next){const candidates=certificateCandidates(screen,next,next===profile.certificate_name);if(candidates.length!==1)return stop('ambiguous_certificate','등록된 인증서·저장소를 유일하게 구분하지 못했습니다.');selected.add(next);await browser.execute({action:'click',ref:candidates[0].ref});screen=await authenticationScreen(browser,allowed,profile,signal);continue;}
+    if(next){const candidates=certificateCandidates(screen,next,next===profile.certificate_name);if(candidates.length!==1)return stop('ambiguous_certificate','등록된 인증서·저장소를 유일하게 구분하지 못했습니다.');selected.add(next);await browser.execute({action:'click',ref:candidates[0].ref});screen=await authenticationScreen(browser,allowed,profile,signal);if(next!==profile.certificate_name)screen=await settle(browser,s=>logged(s)||labels.some(label=>!selected.has(label)&&certificateCandidates(s,label,label===profile.certificate_name).length),signal);continue;}
     const password=screen.elements?.filter(e=>e.type==='password'&&!e.disabled);
     if(password?.length===1&&selected.has(profile.certificate_name)){
      const observed=browser.ref(password[0].ref);const valid=await observed.locator.evaluate(e=>e.type==='password');if(!valid)return stop('password_field_changed','인증서 암호 입력란이 바뀌었습니다. 자동 재시도하지 않습니다.');
      // This is the only credential input path: no model argument, output,
      // clipboard, screenshots, general browser fill or shell command text.
-     state.stage='password_input';try{await observed.locator.fill(profile.password,{timeout:10000});}catch{return stop('password_input_unconfirmed','암호 입력 결과를 확인하지 못했습니다. 직접 로그인하세요.');}finally{profile.password=null;}
+     state.stage='password_input';state.passwordAttempted=true;try{await observed.locator.fill(profile.password,{timeout:10000});}catch{return stop('password_input_unconfirmed','암호 입력 결과를 확인하지 못했습니다. 직접 로그인하세요.');}finally{profile.password=null;}
      screen=await observe(browser);if(!allowed.has(origin(screen.url)))return stop('certificate_origin_unconfirmed','인증서 확인 직전 출처가 바뀌어 제출하지 않았습니다.');
      const confirm=screen.elements.filter(e=>!e.disabled&&/^(확인|로그인)$/.test(e.label));if(confirm.length!==1)return stop('confirmation_unconfirmed','로그인 확인 버튼이 유일하지 않습니다. 암호 입력 이후 재시도하지 않습니다.');
      state.submitted=true;state.stage='certificate_submitted';
