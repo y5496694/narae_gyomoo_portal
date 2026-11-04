@@ -18,7 +18,12 @@ function origin(url){try{return new URL(url).origin;}catch{return '';}}
 const normalized=s=>String(s||'').replace(/\s/g,'');
 const logged=s=>/로그아웃|Logout/i.test(s?.text||'')&&s?.elements?.some(e=>/^(나이스|K-에듀파인)(?:\s|$|\()/.test(e.label));
 const controls='button,a,input,select,[role=button],[role=tab],[role=row],[role=gridcell],label,tr';
-async function observe(browser){return browser.execute({action:'snapshot',selector:controls,limit:100,chars:8000});}
+async function observe(browser){
+ for(let attempt=0;;attempt++){
+  try{return await browser.execute({action:'snapshot',selector:controls,limit:100,chars:8000});}
+  catch(error){if(attempt>=2||!/Execution context was destroyed/.test(String(error.message)))throw error;await browser.execute({action:'wait',ms:350});}
+ }
+}
 async function settle(browser,test,signal,tries=12){
  let screen=await observe(browser);
  for(let i=0;i<tries&&!test(screen);i++){if(signal?.aborted)throw Error('로그인을 중단했습니다.');await browser.execute({action:'wait',ms:350});screen=await observe(browser);}

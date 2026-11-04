@@ -25,6 +25,13 @@ test('DPAPI secret stays in local password input, iframe navigation and delayed 
  assert.equal(f.calls.filter(a=>a.action==='click'&&a.ref==='ok').length,1);assert.equal(f.calls.filter(a=>a.privateFill).length,1);
  assert(!JSON.stringify({calls:f.calls,result}).includes(f.secret));assert(!f.calls.some(a=>a.action==='fill'));
 });
+
+test('read-only observation recovers from a redirect without repeating certificate submission',async()=>{
+ const f=fixture(),execute=f.browser.execute;let redirected=false;
+ f.browser.execute=async a=>{if(a.action==='snapshot'&&!redirected){redirected=true;throw new Error('Execution context was destroyed, most likely because of a navigation');}return execute(a);};
+ const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile});
+ assert.equal(result.complete,true);assert.equal(f.calls.filter(a=>a.ref==='l').length,1);assert.equal(f.calls.filter(a=>a.ref==='ok').length,1);
+});
 test('unapproved origin and ambiguous certificate cannot receive the secret or submit',async()=>{
  for(const options of [{unknownOrigin:true},{ambiguous:true,iframe:true}]){
   const f=fixture(options);const result=await login({}, {cfg,browser:f.browser,state:{},readProfile:async a=>a==='Status'?{valid:true}:f.profile});
